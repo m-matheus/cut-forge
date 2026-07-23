@@ -1,0 +1,209 @@
+{% extends "base.html" %}
+{% block title %}{{ project.run_id }} — CutForge{% endblock %}
+{% block content %}
+<article
+  x-data='wizard("{{ project.run_id }}", {{ steps | tojson }})'
+  x-init="init()">
+
+  <hgroup>
+    <h1>{{ project.character }}{% if project.anime %} · {{ project.anime }}{% endif %}</h1>
+    <p><code>{{ project.run_id }}</code> · idioma <strong>{{ project.language }}</strong>
+       {% if project.mood %}· <em>{{ project.mood }}</em>{% endif %}</p>
+  </hgroup>
+
+  <div class="grid wizard-layout">
+    <!-- Steps column -->
+    <div>
+      <template x-for="step in steps" :key="step.id">
+        <article class="step-card" :class="'status-' + step.status">
+          <header class="step-head">
+            <span class="step-badge" x-text="badge(step.status)"></span>
+            <strong x-text="step.label"></strong>
+            <span class="step-status" x-text="statusLabel(step.status)"></span>
+          </header>
+
+          <!-- Per-step body -->
+          <div class="step-body">
+
+            <!-- LYRICS -->
+            <template x-if="step.id === 'lyrics'">
+              <div>
+                <button class="secondary outline" @click="suggestGenres()"
+                        :aria-busy="busy.suggest" :disabled="busy.suggest">
+                  Sugerir gêneros
+                </button>
+                <template x-if="genres.length">
+                  <div class="genres">
+                    <template x-for="(g, i) in genres" :key="i">
+                      <label class="genre-opt">
+                        <input type="radio" name="genre" :value="g.style" x-model="chosenGenre">
+                        <strong x-text="g.label"></strong>
+                        <small x-text="g.style"></small>
+                        <small class="muted" x-text="g.why"></small>
+                      </label>
+                    </template>
+                  </div>
+                </template>
+                <input placeholder="…ou cole um estilo Suno" x-model="chosenGenre">
+                <button @click="runStep('lyrics', { genre: chosenGenre })"
+                        :disabled="!chosenGenre || running"
+                        :aria-busy="running && current==='lyrics'">
+                  Gerar letra
+                </button>
+                <details class="upload">
+                  <summary>Já tenho a música do Suno</summary>
+                  <p><small>Depois de gerar no suno.ai, envie o <code>track.mp3</code>:</small></p>
+                  <input type="file" accept="audio/*" @change="uploadTrack($event)">
+                  <small x-show="trackUploaded" class="ok">track.mp3 enviado ✓</small>
+                </details>
+              </div>
+            </template>
+
+            <!-- FOOTAGE -->
+            <template x-if="step.id === 'footage'">
+              <div>
+                <input placeholder="URL do YouTube (AMV / edit)" x-model="footageUrl">
+                <button @click="runStep('footage', { url: footageUrl })"
+                        :disabled="!footageUrl || running"
+                        :aria-busy="running && current==='footage'">Baixar</button>
+              </div>
+            </template>
+
+            <!-- ALIGN -->
+            <template x-if="step.id === 'align'">
+              <button @click="runStep('align', {})"
+                      :disabled="step.status==='locked' || running"
+                      :aria-busy="running && current==='align'">Alinhar letra (Whisper)</button>
+            </template>
+
+            <!-- CAPTIONS -->
+            <template x-if="step.id === 'captions'">
+              <div>
+                <label>Cor
+                  <select x-model="captionColor">
+                    <option value="">auto (mood)</option>
+                    <option>cyan</option><option>yellow</option>
+                    <option>orange</option><option>red</option><option>white</option>
+                  </select>
+                </label>
+                <button @click="runStep('captions', { color: captionColor })"
+                        :disabled="step.status==='locked' || running"
+                        :aria-busy="running && current==='captions'">Gerar captions</button>
+              </div>
+            </template>
+
+            <!-- THUMBNAIL -->
+            <template x-if="step.id === 'thumbnail'">
+              <div>
+                <input placeholder="Genre badge (RAP, PHONK…) — opcional" x-model="genreBadge">
+                <button @click="runStep('thumbnail', { genre_badge: genreBadge })"
+                        :disabled="running"
+                        :aria-busy="running && current==='thumbnail'">Gerar thumbnail</button>
+                <template x-if="step.status==='done'">
+                  <img class="thumb" :src="'/static/../' + ''"
+                       :alt="'thumbnail'" x-show="false">
+                </template>
+              </div>
+            </template>
+
+            <!-- METADATA -->
+            <template x-if="step.id === 'metadata'">
+              <button @click="runStep('metadata', {})"
+                      :disabled="running"
+                      :aria-busy="running && current==='metadata'">Gerar título/descrição/tags</button>
+            </template>
+
+            <!-- PREMIERE -->
+            <template x-if="step.id === 'premiere'">
+              <button @click="runStep('premiere', {})"
+                      :disabled="step.status==='locked' || running"
+                      :aria-busy="running && current==='premiere'">Exportar projeto Premiere</button>
+            </template>
+
+          </div>
+          <small class="muted" x-show="step.status==='locked' && step.requires_hint"
+                 x-text="step.requires_hint"></small>
+        </article>
+      </template>
+    </div>
+
+    <!-- Log column -->
+    <div>
+      <article class="log-panel">
+        <header><strong>Log</strong> <span x-show="running" aria-busy="true"></span></header>
+        <pre class="log" x-ref="log"><template x-for="(l,i) in logLines" :key="i"><span x-text="l + '\n'"></span></template></pre>
+      </article>
+    </div>
+  </div>
+</article>
+
+<script>
+function wizard(runId, initialSteps) {
+  return {
+    runId,
+    steps: initialSteps,
+    logLines: [],
+    running: false,
+    current: null,
+    busy: { suggest: false },
+    genres: [],
+    chosenGenre: '',
+    footageUrl: '',
+    captionColor: '',
+    genreBadge: '',
+    trackUploaded: false,
+    _es: null,
+
+    init() {
+      this._es = new EventSource(`/api/runs/${this.runId}/events`);
+      this._es.addEventListener('log', (e) => {
+        this.logLines.push(e.data);
+        this.$nextTick(() => { const el = this.$refs.log; if (el) el.scrollTop = el.scrollHeight; });
+      });
+      this._es.addEventListener('done', () => {
+        this.running = false; this.current = null;
+        this.refreshState();
+      });
+    },
+
+    badge(s) { return { done:'✓', running:'…', error:'✕', locked:'🔒', pending:'○' }[s] || '○'; },
+    statusLabel(s) { return { done:'concluído', running:'rodando', error:'erro', locked:'bloqueado', pending:'pronto' }[s] || s; },
+
+    async refreshState() {
+      const r = await fetch(`/api/runs/${this.runId}/state`);
+      const j = await r.json();
+      this.steps = j.steps;
+    },
+
+    async suggestGenres() {
+      this.busy.suggest = true;
+      try {
+        const r = await fetch(`/api/runs/${this.runId}/suggest-genres`, { method: 'POST' });
+        const j = await r.json();
+        this.genres = j.directions || [];
+      } finally { this.busy.suggest = false; }
+    },
+
+    async runStep(stepId, params) {
+      this.running = true; this.current = stepId;
+      this.logLines.push(`▶ ${stepId}`);
+      await fetch(`/api/runs/${this.runId}/steps/${stepId}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(params || {}),
+      });
+      // completion arrives via the SSE 'done' event
+    },
+
+    async uploadTrack(ev) {
+      const file = ev.target.files[0];
+      if (!file) return;
+      const fd = new FormData(); fd.append('file', file);
+      await fetch(`/api/runs/${this.runId}/track`, { method: 'POST', body: fd });
+      this.trackUploaded = true;
+      this.refreshState();
+    },
+  };
+}
+</script>
+{% endblock %}

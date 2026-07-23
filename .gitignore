@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+
+# Env / secrets
+.env
+
+# App output (runs)
+output/
+
+# PyInstaller
+*.spec.bak
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

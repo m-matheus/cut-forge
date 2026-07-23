@@ -1,0 +1,133 @@
+"""VideoProject — the central handle for one run.
+
+A "run" is one music-video project living under ``output/{YYYYMMDD}-{slug}/``. This
+object knows the channel, the creative context (character/anime/mood/language) and
+resolves every file path in the run layout, so services never hard-code paths.
+
+The lightweight metadata (character, anime, mood, language, title...) is persisted to
+``project.json`` at the run root so the app can reopen a run across restarts.
+"""
+from __future__ import annotations
+
+import json
+from pathlib import Path
+
+from pydantic import BaseModel, Field
+
+from cutforge.config.channels import Channel, load_channel
+from cutforge.config.settings import get_settings
+
+PROJECT_FILE = "project.json"
+
+
+class VideoProject(BaseModel):
+    """Persisted run context + path resolver."""
+
+    run_id: str                    # folder name, e.g. "20260722-jinwoo-shadow-monarch"
+    channel_slug: str = "zenkai-beats"
+    language: str = "en"           # en | es | pt
+
+    # Creative context
+    topic: str = ""
+    character: str = ""
+    anime: str = ""
+    mood: str = ""
+
+    # Filled by later steps
+    title: str = ""
+    footage_url: str = ""
+
+    # --- Channel (not serialized; resolved on demand) ---
+    @property
+    def channel(self) -> Channel:
+        return load_channel(self.channel_slug)
+
+    # --- Paths ---
+    @property
+    def run_dir(self) -> Path:
+        return get_settings().output_dir / self.run_id
+
+    @property
+    def audio_dir(self) -> Path:
+        return self.run_dir / "audio"
+
+    @property
+    def lyrics_path(self) -> Path:
+        return self.run_dir / "lyrics.txt"
+
+    @property
+    def suno_prompt_path(self) -> Path:
+        return self.run_dir / "suno_prompt.json"
+
+    @property
+    def track_path(self) -> Path:
+        return self.audio_dir / "track.mp3"
+
+    @property
+    def whisper_cache_path(self) -> Path:
+        return self.audio_dir / "whisper_transcript.json"
+
+    @property
+    def alignment_path(self) -> Path:
+        return self.audio_dir / "lyrics_alignment.json"
+
+    @property
+    def captions_path(self) -> Path:
+        return self.audio_dir / "captions.ass"
+
+    @property
+    def footage_dir(self) -> Path:
+        return self.run_dir / "footage"
+
+    @property
+    def footage_path(self) -> Path:
+        return self.footage_dir / "source.mp4"
+
+    @property
+    def thumbnail_dir(self) -> Path:
+        return self.run_dir / "thumbnail"
+
+    @property
+    def thumbnail_path(self) -> Path:
+        return self.thumbnail_dir / "thumbnail.jpg"
+
+    @property
+    def metadata_path(self) -> Path:
+        return self.run_dir / "script" / "metadata.json"
+
+    @property
+    def premiere_dir(self) -> Path:
+        return self.run_dir / "premiere"
+
+    @property
+    def premiere_project_path(self) -> Path:
+        return self.premiere_dir / "project.xml"
+
+    # --- Persistence ---
+    def save(self) -> None:
+        self.run_dir.mkdir(parents=True, exist_ok=True)
+        (self.run_dir / PROJECT_FILE).write_text(
+            self.model_dump_json(indent=2), encoding="utf-8"
+        )
+
+    @classmethod
+    def load(cls, run_id: str) -> "VideoProject":
+        path = get_settings().output_dir / run_id / PROJECT_FILE
+        if not path.exists():
+            raise FileNotFoundError(f"No project.json for run '{run_id}' at {path}")
+        return cls(**json.loads(path.read_text(encoding="utf-8")))
+
+    @classmethod
+    def create(cls, run_id: str, **kwargs) -> "VideoProject":
+        project = cls(run_id=run_id, **kwargs)
+        project.save()
+        return project
+
+
+def list_runs() -> list[str]:
+    """Return run_ids (folder names) that contain a project.json, newest first."""
+    base = get_settings().output_dir
+    if not base.exists():
+        return []
+    runs = [c.name for c in base.iterdir() if (c / PROJECT_FILE).exists()]
+    return sorted(runs, reverse=True)

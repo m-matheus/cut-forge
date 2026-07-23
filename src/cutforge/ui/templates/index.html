@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block content %}
+<section x-data="{ creating: false }">
+  <hgroup>
+    <h1>Novo vídeo</h1>
+    <p>Crie um run de vídeo musical. Cada etapa roda separada, com progresso ao vivo.</p>
+  </hgroup>
+
+  <form @submit.prevent="
+      creating = true;
+      const fd = new FormData($el);
+      const r = await fetch('/api/runs', { method: 'POST', body: fd });
+      const j = await r.json();
+      window.location.href = '/runs/' + j.run_id;
+    ">
+    <div class="grid">
+      <label>Personagem
+        <input name="character" placeholder="Sung Jinwoo" required>
+      </label>
+      <label>Anime
+        <input name="anime" placeholder="Solo Leveling">
+      </label>
+    </div>
+    <div class="grid">
+      <label>Mood / vibe
+        <input name="mood" placeholder="dark cold shadow army, ominous power">
+      </label>
+      <label>Idioma
+        <select name="language">
+          <option value="en">English</option>
+          <option value="pt">Português</option>
+          <option value="es">Español</option>
+        </select>
+      </label>
+    </div>
+    <label>Canal
+      <select name="channel_slug">
+        {% for ch in channels %}
+        <option value="{{ ch.slug }}">{{ ch.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <input type="hidden" name="topic" value="">
+    <button type="submit" :aria-busy="creating" :disabled="creating">Criar run</button>
+  </form>
+</section>
+
+{% if runs %}
+<section>
+  <h2>Runs recentes</h2>
+  <div class="grid">
+    {% for run in runs %}
+    <article>
+      <a href="/runs/{{ run }}"><strong>{{ run }}</strong></a>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endif %}
+{% endblock %}

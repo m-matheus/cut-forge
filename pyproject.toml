@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cutforge"
+version = "0.1.0"
+description = "Anime music-video generator — script/lyrics, footage, karaoke alignment and Premiere-ready project export."
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{ name = "Matheus Moraes" }]
+
+dependencies = [
+    # AI content generation
+    "anthropic>=0.39.0",
+    "openai>=1.30.0",
+    "elevenlabs>=1.0.0",
+    # Footage download
+    "yt-dlp>=2024.1.0",
+    # Editable timeline export (Premiere reads FCP7 XML)
+    "opentimelineio>=0.15.0",
+    "otio-fcp-adapter>=1.0.0",
+    # Config / models
+    "pydantic>=2.6.0",
+    "pydantic-settings>=2.2.0",
+    "python-dotenv>=1.0.0",
+    # Media / images
+    "mutagen>=1.47.0",
+    "Pillow>=10.0.0",
+    # Desktop UI (FastAPI + pywebview)
+    "fastapi>=0.110.0",
+    "uvicorn>=0.29.0",
+    "jinja2>=3.1.0",
+    "python-multipart>=0.0.9",
+    "sse-starlette>=2.0.0",
+    "pywebview>=5.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "pyinstaller>=6.0.0",
+]
+
+[project.scripts]
+cutforge = "cutforge.ui.desktop:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+cutforge = ["ui/templates/**/*", "ui/static/**/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
