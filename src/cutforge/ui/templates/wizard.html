@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% block title %}{{ project.run_id }} — CutForge{% endblock %}
 {% block content %}
+
+<!-- Toast container -->
+<div id="toast-container" aria-live="polite"></div>
+
+<nav class="breadcrumb">
+  <a href="/">← Todos os runs</a>
+</nav>
+
 <article
   x-data='wizard("{{ project.run_id }}", {{ steps | tojson }})'
   x-init="init()">
@@ -12,50 +20,107 @@
   </hgroup>
 
   <div class="grid wizard-layout">
-    <!-- Steps column -->
+    <!-- Steps column (accordion) -->
     <div>
       <template x-for="step in steps" :key="step.id">
-        <article class="step-card" :class="'status-' + step.status">
-          <header class="step-head">
+        <article class="step-card" :class="stepClass(step)" :id="'step-' + step.id">
+          <header class="step-head" @click="toggleStep(step.id)">
             <span class="step-badge" x-text="badge(step.status)"></span>
             <strong x-text="step.label"></strong>
             <span class="step-status" x-text="statusLabel(step.status)"></span>
+            <span class="step-chevron" x-text="openStep===step.id ? '▾' : '▸'"></span>
           </header>
 
-          <!-- Per-step body -->
-          <div class="step-body">
+          <div class="step-body" x-show="openStep===step.id">
+
+            <!-- REFERENCE (optional) -->
+            <template x-if="step.id === 'reference'">
+              <div>
+                <p><small>Cole a URL de um rap que você curte. Baixamos o áudio, transcrevemos
+                   a letra e extraímos o BPM/ritmo para inspirar a geração — a música gerada é
+                   <strong>autoral</strong>, nunca copiada.</small></p>
+                <input placeholder="URL do YouTube (rap de referência)" x-model="referenceUrl">
+                <button @click="runStep('reference', { url: referenceUrl })"
+                        :disabled="!referenceUrl || running"
+                        :aria-busy="running && current==='reference'">Analisar referência</button>
+                <template x-if="step.status==='done' && referenceOutput.bpm">
+                  <details class="output-preview" open>
+                    <summary>Perfil da referência</summary>
+                    <div class="output-block">
+                      <p><strong x-text="referenceOutput.source_title"></strong></p>
+                      <p class="muted">
+                        <span x-text="referenceOutput.bpm + ' BPM'"></span> ·
+                        <span x-text="(referenceOutput.flow?.words_per_sec ?? '?') + ' palavras/s'"></span>
+                      </p>
+                    </div>
+                  </details>
+                </template>
+              </div>
+            </template>
 
             <!-- LYRICS -->
             <template x-if="step.id === 'lyrics'">
               <div>
-                <button class="secondary outline" @click="suggestGenres()"
-                        :aria-busy="busy.suggest" :disabled="busy.suggest">
-                  Sugerir gêneros
-                </button>
-                <template x-if="genres.length">
-                  <div class="genres">
-                    <template x-for="(g, i) in genres" :key="i">
-                      <label class="genre-opt">
-                        <input type="radio" name="genre" :value="g.style" x-model="chosenGenre">
-                        <strong x-text="g.label"></strong>
-                        <small x-text="g.style"></small>
-                        <small class="muted" x-text="g.why"></small>
-                      </label>
-                    </template>
-                  </div>
-                </template>
-                <input placeholder="…ou cole um estilo Suno" x-model="chosenGenre">
-                <button @click="runStep('lyrics', { genre: chosenGenre })"
-                        :disabled="!chosenGenre || running"
-                        :aria-busy="running && current==='lyrics'">
-                  Gerar letra
-                </button>
-                <details class="upload">
-                  <summary>Já tenho a música do Suno</summary>
+                <div class="tab-bar">
+                  <button type="button" class="tab-btn" :class="lyricsTab==='generate' ? 'tab-active' : 'secondary outline'"
+                          @click="lyricsTab='generate'">Gerar via IA</button>
+                  <button type="button" class="tab-btn" :class="lyricsTab==='upload' ? 'tab-active' : 'secondary outline'"
+                          @click="lyricsTab='upload'">Já tenho a música</button>
+                </div>
+
+                <!-- Generate tab -->
+                <div x-show="lyricsTab==='generate'">
+                  <template x-if="hasReference">
+                    <p class="ok"><small>✓ Usando o rap de referência para inspirar o flow.</small></p>
+                  </template>
+                  <button class="secondary outline" @click="suggestGenres()"
+                          :aria-busy="busy.suggest" :disabled="busy.suggest">
+                    Sugerir gêneros
+                  </button>
+                  <template x-if="genres.length">
+                    <div class="genres">
+                      <template x-for="(g, i) in genres" :key="i">
+                        <label class="genre-opt" :class="chosenGenre===g.style ? 'genre-opt-selected' : ''">
+                          <input type="radio" name="genre" :value="g.style" x-model="chosenGenre">
+                          <strong x-text="g.label"></strong>
+                          <small x-text="g.style"></small>
+                          <small class="muted" x-text="g.why"></small>
+                        </label>
+                      </template>
+                    </div>
+                  </template>
+                  <input placeholder="…ou cole um estilo Suno" x-model="chosenGenre">
+                  <button @click="generateLyrics(step)"
+                          :disabled="!chosenGenre || running"
+                          :aria-busy="running && current==='lyrics'">
+                    <span x-text="step.status==='done' ? 'Regerar letra' : 'Gerar letra'"></span>
+                  </button>
+                </div>
+
+                <!-- Upload tab -->
+                <div x-show="lyricsTab==='upload'">
                   <p><small>Depois de gerar no suno.ai, envie o <code>track.mp3</code>:</small></p>
                   <input type="file" accept="audio/*" @change="uploadTrack($event)">
                   <small x-show="trackUploaded" class="ok">track.mp3 enviado ✓</small>
-                </details>
+                </div>
+
+                <!-- Output preview -->
+                <template x-if="step.status==='done' && lyricsOutput.lyrics">
+                  <details class="output-preview" open>
+                    <summary>Letra gerada</summary>
+                    <div class="output-block">
+                      <div class="output-meta">
+                        <strong x-text="lyricsOutput.title"></strong>
+                        <small class="muted" x-text="lyricsOutput.style"></small>
+                      </div>
+                      <pre class="output-text" x-text="lyricsOutput.lyrics"></pre>
+                      <button class="secondary outline copy-btn" @click="copyText(lyricsOutput.lyrics)">Copiar letra</button>
+                      <template x-if="lyricsOutput.style">
+                        <button class="secondary outline copy-btn" @click="copyText(lyricsOutput.style)">Copiar estilo Suno</button>
+                      </template>
+                    </div>
+                  </details>
+                </template>
               </div>
             </template>
 
@@ -71,7 +136,7 @@
 
             <!-- ALIGN -->
             <template x-if="step.id === 'align'">
-              <button @click="runStep('align', {})"
+              <button @click="confirmRun('align', {}, 'Alinhar chama a API Whisper (OpenAI).')"
                       :disabled="step.status==='locked' || running"
                       :aria-busy="running && current==='align'">Alinhar letra (Whisper)</button>
             </template>
@@ -79,6 +144,12 @@
             <!-- CAPTIONS -->
             <template x-if="step.id === 'captions'">
               <div>
+                <label>Estilo
+                  <select x-model="captionStyle">
+                    <option value="karaoke">Karaokê (linha na base)</option>
+                    <option value="kinetic">Kinético (centralizado, pop-in)</option>
+                  </select>
+                </label>
                 <label>Cor
                   <select x-model="captionColor">
                     <option value="">auto (mood)</option>
@@ -86,7 +157,7 @@
                     <option>orange</option><option>red</option><option>white</option>
                   </select>
                 </label>
-                <button @click="runStep('captions', { color: captionColor })"
+                <button @click="runStep('captions', { color: captionColor, style: captionStyle })"
                         :disabled="step.status==='locked' || running"
                         :aria-busy="running && current==='captions'">Gerar captions</button>
               </div>
@@ -96,42 +167,79 @@
             <template x-if="step.id === 'thumbnail'">
               <div>
                 <input placeholder="Genre badge (RAP, PHONK…) — opcional" x-model="genreBadge">
-                <button @click="runStep('thumbnail', { genre_badge: genreBadge })"
+                <button @click="confirmRun('thumbnail', { genre_badge: genreBadge }, 'Gerar thumbnail chama a API OpenAI Images.')"
                         :disabled="running"
                         :aria-busy="running && current==='thumbnail'">Gerar thumbnail</button>
                 <template x-if="step.status==='done'">
-                  <img class="thumb" :src="'/static/../' + ''"
-                       :alt="'thumbnail'" x-show="false">
+                  <img class="thumb" :src="`/api/runs/${runId}/output/thumbnail?t=${Date.now()}`"
+                       alt="Thumbnail gerada">
                 </template>
               </div>
             </template>
 
             <!-- METADATA -->
             <template x-if="step.id === 'metadata'">
-              <button @click="runStep('metadata', {})"
-                      :disabled="running"
-                      :aria-busy="running && current==='metadata'">Gerar título/descrição/tags</button>
+              <div>
+                <button @click="confirmRun('metadata', {}, 'Gerar metadata chama a API Anthropic.')"
+                        :disabled="running"
+                        :aria-busy="running && current==='metadata'">Gerar título/descrição/tags</button>
+
+                <template x-if="step.status==='done' && metadataOutput.title">
+                  <details class="output-preview" open>
+                    <summary>Metadata gerada</summary>
+                    <div class="output-block">
+                      <p><strong x-text="metadataOutput.title"></strong></p>
+                      <pre class="output-text small" x-text="metadataOutput.description"></pre>
+                      <p class="tags-row">
+                        <template x-for="(tag, i) in (metadataOutput.tags || [])" :key="i">
+                          <span class="tag" x-text="tag"></span>
+                        </template>
+                      </p>
+                      <button class="secondary outline copy-btn" @click="copyText(metadataOutput.title)">Copiar título</button>
+                      <button class="secondary outline copy-btn" @click="copyText(metadataOutput.description)">Copiar descrição</button>
+                    </div>
+                  </details>
+                </template>
+              </div>
             </template>
 
             <!-- PREMIERE -->
             <template x-if="step.id === 'premiere'">
-              <button @click="runStep('premiere', {})"
-                      :disabled="step.status==='locked' || running"
-                      :aria-busy="running && current==='premiere'">Exportar projeto Premiere</button>
+              <div>
+                <button @click="runStep('premiere', {})"
+                        :disabled="step.status==='locked' || running"
+                        :aria-busy="running && current==='premiere'">Exportar projeto Premiere</button>
+                <template x-if="step.status==='done'">
+                  <button class="secondary outline" @click="openFolder()">Abrir pasta de saída</button>
+                </template>
+              </div>
             </template>
 
+            <!-- Retry button on error -->
+            <template x-if="step.status==='error'">
+              <button class="secondary outline retry-btn" @click="runStep(step.id, {}, true)"
+                      :aria-busy="running && current===step.id">Tentar novamente</button>
+            </template>
+
+            <!-- Locked hint -->
+            <template x-if="step.status==='locked' && step.requires_hint">
+              <small class="muted locked-hint" x-text="step.requires_hint"></small>
+            </template>
           </div>
-          <small class="muted" x-show="step.status==='locked' && step.requires_hint"
-                 x-text="step.requires_hint"></small>
         </article>
       </template>
     </div>
 
-    <!-- Log column -->
+    <!-- Log column (sticky, always visible) -->
     <div>
       <article class="log-panel">
-        <header><strong>Log</strong> <span x-show="running" aria-busy="true"></span></header>
-        <pre class="log" x-ref="log"><template x-for="(l,i) in logLines" :key="i"><span x-text="l + '\n'"></span></template></pre>
+        <header class="log-head">
+          <strong>Log</strong>
+          <span x-show="running" aria-busy="true"></span>
+          <button class="secondary outline log-copy" @click="copyLog()"
+                  :disabled="!logLines.length" title="Copiar todo o log">Copiar log</button>
+        </header>
+        <pre class="log" x-ref="log"><template x-for="(l,i) in logLines" :key="i"><span :class="logClass(l)" x-text="l + '\n'"></span></template></pre>
       </article>
     </div>
   </div>
@@ -145,34 +253,89 @@ function wizard(runId, initialSteps) {
     logLines: [],
     running: false,
     current: null,
+    openStep: null,
     busy: { suggest: false },
     genres: [],
     chosenGenre: '',
     footageUrl: '',
+    referenceUrl: '',
     captionColor: '',
+    captionStyle: 'karaoke',
     genreBadge: '',
     trackUploaded: false,
+    lyricsTab: 'generate',
+    lyricsOutput: {},
+    metadataOutput: {},
+    referenceOutput: {},
+    hasReference: false,
     _es: null,
 
     init() {
+      // Open the first actionable step (pending, else first).
+      const firstPending = this.steps.find(s => s.status === 'pending');
+      this.openStep = (firstPending || this.steps[0] || {}).id || null;
+
       this._es = new EventSource(`/api/runs/${this.runId}/events`);
       this._es.addEventListener('log', (e) => {
         this.logLines.push(e.data);
         this.$nextTick(() => { const el = this.$refs.log; if (el) el.scrollTop = el.scrollHeight; });
       });
       this._es.addEventListener('done', () => {
-        this.running = false; this.current = null;
-        this.refreshState();
+        const finished = this.current;
+        this.running = false;
+        this.current = null;
+        this.refreshState().then(() => {
+          this.loadOutputs();
+          // Auto-advance: open the next pending step after one completes.
+          if (finished) {
+            const idx = this.steps.findIndex(s => s.id === finished);
+            const next = this.steps.slice(idx + 1).find(s => s.status === 'pending');
+            if (next) this.openStep = next.id;
+          }
+        });
       });
+      this.loadOutputs();
+    },
+
+    toggleStep(id) { this.openStep = this.openStep === id ? null : id; },
+
+    stepClass(step) {
+      const classes = ['status-' + step.status];
+      if (step.id === this.current) classes.push('status-active');
+      if (step.id === this.openStep) classes.push('is-open');
+      return classes.join(' ');
     },
 
     badge(s) { return { done:'✓', running:'…', error:'✕', locked:'🔒', pending:'○' }[s] || '○'; },
     statusLabel(s) { return { done:'concluído', running:'rodando', error:'erro', locked:'bloqueado', pending:'pronto' }[s] || s; },
 
+    logClass(line) {
+      if (/error|erro|exception|traceback|✕/i.test(line)) return 'log-error';
+      if (/done|concluído|✓|saved|gerado|exportado/i.test(line)) return 'log-ok';
+      if (/▶/.test(line)) return 'log-start';
+      return '';
+    },
+
     async refreshState() {
       const r = await fetch(`/api/runs/${this.runId}/state`);
       const j = await r.json();
       this.steps = j.steps;
+    },
+
+    async loadOutputs() {
+      const done = (id) => this.steps.find(s => s.id === id && s.status === 'done');
+      if (done('reference')) {
+        const r = await fetch(`/api/runs/${this.runId}/output/reference`);
+        if (r.ok) { this.referenceOutput = await r.json(); this.hasReference = true; }
+      }
+      if (done('lyrics')) {
+        const r = await fetch(`/api/runs/${this.runId}/output/lyrics`);
+        if (r.ok) this.lyricsOutput = await r.json();
+      }
+      if (done('metadata')) {
+        const r = await fetch(`/api/runs/${this.runId}/output/metadata`);
+        if (r.ok) this.metadataOutput = await r.json();
+      }
     },
 
     async suggestGenres() {
@@ -184,15 +347,33 @@ function wizard(runId, initialSteps) {
       } finally { this.busy.suggest = false; }
     },
 
-    async runStep(stepId, params) {
+    confirmRun(stepId, params, warning) {
+      if (!confirm(warning + '\n\nContinuar?')) return;
+      this.runStep(stepId, params);
+    },
+
+    generateLyrics(step) {
+      // The genre shapes the whole song, so re-generating with a new genre means
+      // re-running the lyrics step. Force it when lyrics already exist (confirm first).
+      const regenerating = step.status === 'done';
+      const msg = regenerating
+        ? 'Isso vai SUBSTITUIR a letra atual por uma nova (chama a API Anthropic).'
+        : 'Gerar letra chama a API Anthropic.';
+      if (!confirm(msg + '\n\nContinuar?')) return;
+      this.lyricsOutput = {};
+      this.runStep('lyrics', { genre: this.chosenGenre }, regenerating);
+    },
+
+    async runStep(stepId, params, force) {
       this.running = true; this.current = stepId;
       this.logLines.push(`▶ ${stepId}`);
+      const body = { ...(params || {}) };
+      if (force) body.force = true;
       await fetch(`/api/runs/${this.runId}/steps/${stepId}`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params || {}),
+        body: JSON.stringify(body),
       });
-      // completion arrives via the SSE 'done' event
     },
 
     async uploadTrack(ev) {
@@ -202,6 +383,29 @@ function wizard(runId, initialSteps) {
       await fetch(`/api/runs/${this.runId}/track`, { method: 'POST', body: fd });
       this.trackUploaded = true;
       this.refreshState();
+    },
+
+    async openFolder() {
+      await fetch(`/api/runs/${this.runId}/open-folder`, { method: 'POST' });
+    },
+
+    copyText(text) {
+      navigator.clipboard.writeText(text).then(() => this.toast('Copiado!'));
+    },
+
+    copyLog() {
+      if (!this.logLines.length) return;
+      navigator.clipboard.writeText(this.logLines.join('\n')).then(() => this.toast('Log copiado!'));
+    },
+
+    toast(msg) {
+      const el = document.getElementById('toast-container');
+      const t = document.createElement('div');
+      t.className = 'toast';
+      t.textContent = msg;
+      el.appendChild(t);
+      setTimeout(() => t.classList.add('toast-show'), 10);
+      setTimeout(() => { t.classList.remove('toast-show'); setTimeout(() => t.remove(), 300); }, 2500);
     },
   };
 }

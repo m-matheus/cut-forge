@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<section x-data="{ creating: false }">
+<section x-data="{ creating: false, suggestingMood: false, mood: '' }">
   <hgroup>
     <h1>Novo vídeo</h1>
     <p>Crie um run de vídeo musical. Cada etapa roda separada, com progresso ao vivo.</p>
@@ -15,15 +15,33 @@
     ">
     <div class="grid">
       <label>Personagem
-        <input name="character" placeholder="Sung Jinwoo" required>
+        <input name="character" placeholder="Sung Jinwoo" required x-ref="character">
       </label>
       <label>Anime
-        <input name="anime" placeholder="Solo Leveling">
+        <input name="anime" placeholder="Solo Leveling" x-ref="anime">
       </label>
     </div>
     <div class="grid">
-      <label>Mood / vibe
-        <input name="mood" placeholder="dark cold shadow army, ominous power">
+      <label>Mood / vibe <small class="muted">(opcional — deixe vazio para a IA inferir)</small>
+        <div class="input-with-btn">
+          <input name="mood" placeholder="dark cold shadow army, ominous power" x-model="mood">
+          <button type="button" class="secondary outline"
+                  :aria-busy="suggestingMood" :disabled="suggestingMood"
+                  @click="
+                    const character = $refs.character.value.trim();
+                    if (!character) { alert('Informe o personagem primeiro.'); return; }
+                    suggestingMood = true;
+                    try {
+                      const r = await fetch('/api/suggest-mood', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ character, anime: $refs.anime.value.trim() }),
+                      });
+                      const j = await r.json();
+                      if (j.mood) mood = j.mood;
+                    } finally { suggestingMood = false; }
+                  ">Sugerir</button>
+        </div>
       </label>
       <label>Idioma
         <select name="language">
@@ -40,21 +58,40 @@
         {% endfor %}
       </select>
     </label>
-    <input type="hidden" name="topic" value="">
     <button type="submit" :aria-busy="creating" :disabled="creating">Criar run</button>
   </form>
 </section>
 
-{% if runs %}
-<section>
+<section x-data='{ runs: {{ runs | tojson }} }'>
   <h2>Runs recentes</h2>
-  <div class="grid">
-    {% for run in runs %}
-    <article>
-      <a href="/runs/{{ run }}"><strong>{{ run }}</strong></a>
-    </article>
-    {% endfor %}
-  </div>
+  <template x-if="runs.length">
+    <div class="runs-list">
+      <template x-for="run in runs" :key="run.run_id">
+        <div class="run-card">
+          <a :href="'/runs/' + run.run_id" class="run-card-link">
+            <div class="run-card-main">
+              <strong x-text="(run.character || run.run_id) + (run.anime ? ' · ' + run.anime : '')"></strong>
+              <template x-if="run.title">
+                <span class="run-title" x-text="run.title"></span>
+              </template>
+            </div>
+          </a>
+          <div class="run-card-meta">
+            <code class="run-id" x-text="run.run_id"></code>
+            <span class="run-lang" x-text="run.language"></span>
+          </div>
+          <button class="run-delete secondary outline" title="Deletar run"
+                  @click="
+                    if (!confirm('Deletar este run e todos os seus arquivos? Isso não pode ser desfeito.')) return;
+                    await fetch('/api/runs/' + run.run_id, { method: 'DELETE' });
+                    runs = runs.filter(r => r.run_id !== run.run_id);
+                  ">🗑</button>
+        </div>
+      </template>
+    </div>
+  </template>
+  <template x-if="!runs.length">
+    <p class="muted empty-state">Nenhum vídeo criado ainda. Comece pelo formulário acima.</p>
+  </template>
 </section>
-{% endif %}
 {% endblock %}

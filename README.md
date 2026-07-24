@@ -19,19 +19,35 @@ Cut Pro 7 XML** que o **Adobe Premiere Pro importa nativamente** — você edita
 > **Escopo v1:** só vídeos de música, um idioma por run. Sem publish automático — o pipeline
 > termina na exportação do projeto Premiere.
 
-## Rodando (dev)
+## Rodando (recomendado — web app local)
+
+O CutForge é um web app local (FastAPI + htmx/Alpine). O jeito mais simples e robusto
+de usar é rodar o servidor e abrir no navegador — sem empacotar `.exe`.
+
+**Setup (uma vez):**
 
 ```bash
 python -m venv .venv
 .venv\Scripts\activate
 pip install -e .
 copy .env.example .env    # preencha as chaves
-python -m cutforge.ui.desktop
 ```
 
-A janela do app abre com o wizard. Crie um run e vá rodando cada etapa.
+**Uso (dia a dia):** dê um duplo-clique em **`CutForge.bat`** — ele sobe o servidor e abre
+o navegador automaticamente (porta 8760). Ou, manualmente:
 
-## Gerando o executável (.exe)
+```bash
+python -m cutforge.ui.desktop --browser
+```
+
+> Prefere uma janela nativa em vez do navegador? Rode `python -m cutforge.ui.desktop`
+> (usa pywebview). Para servir sem abrir nada: `--no-window`. Fixe a porta com `--port 9000`.
+
+## Gerando o executável (.exe) — opcional
+
+Só necessário para distribuir a quem **não tem Python**. O empacotamento do `librosa`
+(numba/llvmlite) é sensível — **teste rodando uma análise de ritmo real no `.exe`**, não só
+abrir o app.
 
 ```bash
 pip install -e ".[dev]"

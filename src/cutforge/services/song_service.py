@@ -108,6 +108,50 @@ def _lang_directive(language: str) -> str:
     )
 
 
+SUGGEST_MOOD_SYSTEM_PROMPT = """\
+You are a creative director for an anime music channel (7 Minutoz / Rustage / Sensei Beats style).
+Given an anime character (or matchup), describe the MOOD / VIBE that an original song about them
+should have — the emotional atmosphere that drives the music, caption colors and thumbnail.
+
+Return a SINGLE short line: 3-6 comma-separated descriptors capturing the character's energy
+(e.g. "dark, cold, ominous power, shadow army" or "hot-blooded, explosive, heroic, hype").
+No commentary, no quotes, no markdown — just the descriptors line.
+"""
+
+
+REFERENCE_SYSTEM_ADDENDUM = """\
+
+REFERENCE INSPIRATION (STRICT RULES)
+You are given a reference rap the user admires: its transcript, BPM, and flow metrics.
+Use it ONLY as a style signal. This is the load-bearing rule:
+- NEVER copy, quote, closely paraphrase, or interpolate ANY line, hook, or distinctive
+  phrase from the reference transcript. Do not reuse its rhyme scheme word-for-word.
+- NEVER reuse the reference's proper nouns, names, or brand-specific catchphrases.
+- The transcript may contain mis-heard words (auto-transcribed) — treat it as vibe only.
+What you SHOULD match:
+- The tempo/energy feel (target roughly the given BPM) and rhythmic density.
+- The flow: line length and syllables-per-bar. Faster BPM / higher words-per-second =>
+  shorter, denser lines; slower => more spacious lines.
+- The section structure and overall attitude/theme energy.
+Produce a STANDALONE, original composition about the CutForge character. It must be
+new work that merely FEELS like it shares the reference's DNA — never derivative of its
+actual words. Include a tempo tag near the target BPM in the Suno style string.
+"""
+
+
+def suggest_mood(character: str, anime: str = "") -> str:
+    """Return a short mood/vibe descriptor line for a character (stateless)."""
+    who = f"{character} from {anime}" if anime else character
+    user_prompt = (
+        f"Character / matchup: {who}\n\n"
+        "Give the mood/vibe line for an original anime song about this. One line only."
+    )
+    text = anthropic_client.complete_text(SUGGEST_MOOD_SYSTEM_PROMPT, user_prompt)
+    if not text:
+        return ""
+    return text.strip().strip('"').splitlines()[0]
+
+
 def suggest_genres(project: VideoProject) -> GenreSuggestions:
     """Return 3 genre directions for the project's character/topic."""
     topic = project.topic or project.character
@@ -121,8 +165,19 @@ def suggest_genres(project: VideoProject) -> GenreSuggestions:
     return GenreSuggestions(character_read=data.get("character_read", ""), directions=directions)
 
 
-def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False) -> SongPackage:
-    """Generate the full Suno package and write lyrics.txt + suno_prompt.json."""
+def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
+                     reference_profile: dict | None = None) -> SongPackage:
+    """Generate the full Suno package and write lyrics.txt + suno_prompt.json.
+
+    If ``reference_profile`` is None, auto-loads a saved profile for this run (produced
+    by the optional ``reference`` step). When present, the song is written to be heavily
+    inspired by — but never derivative of — the reference rap.
+    """
+    # Auto-load a saved reference profile (lazy import avoids a circular dependency).
+    if reference_profile is None:
+        from cutforge.services import reference_service
+        reference_profile = reference_service.load_reference_profile(project)
+
     topic = project.topic or project.character
     lines = [
         f"Character / matchup: {topic}",
@@ -137,11 +192,26 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False) 
                      "chorus their clash.")
     lines.append("")
     lines.append(_lang_directive(project.language))
+
+    system_prompt = GENERATE_SYSTEM_PROMPT
+    if reference_profile:
+        system_prompt = GENERATE_SYSTEM_PROMPT + REFERENCE_SYSTEM_ADDENDUM
+        flow = reference_profile.get("flow", {})
+        lines.append("")
+        lines.append("REFERENCE (style signal only — DO NOT COPY):")
+        lines.append(f"- BPM: {reference_profile.get('bpm')}")
+        lines.append(f"- Time signature: {reference_profile.get('time_signature')}/4")
+        lines.append(f"- Onset density: {reference_profile.get('onset_rate_per_sec')} onsets/s")
+        lines.append(f"- Flow: {flow.get('words_per_sec')} words/s, "
+                     f"~{flow.get('syllables_per_beat')} syllables/beat")
+        lines.append(f"- Reference transcript (reference only — do not copy any line):")
+        lines.append(reference_profile.get("transcript", ""))
+
     lines.append("")
     lines.append("Write the complete Suno package. Return only valid JSON.")
     user_prompt = "\n".join(lines)
 
-    data = anthropic_client.complete_json(GENERATE_SYSTEM_PROMPT, user_prompt)
+    data = anthropic_client.complete_json(system_prompt, user_prompt)
     package = SongPackage(
         title=data.get("title", ""),
         style=data.get("style", ""),

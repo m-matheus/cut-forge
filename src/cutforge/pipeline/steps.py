@@ -39,6 +39,13 @@ def _always(_p: VideoProject) -> bool:
 # Ordered wizard steps.
 STEPS: list[Step] = [
     Step(
+        id="reference",
+        label="Rap de referência (opcional)",
+        is_done=lambda p: p.reference_profile_path.exists(),
+        can_run=_always,
+        requires_hint="Cole a URL do YouTube do rap de referência.",
+    ),
+    Step(
         id="lyrics",
         label="Letra & estilo",
         is_done=lambda p: p.suno_prompt_path.exists() and p.lyrics_path.exists(),

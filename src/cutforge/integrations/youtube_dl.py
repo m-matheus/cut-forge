@@ -63,3 +63,42 @@ def download(url: str, dest: Path, *, on_log=None) -> dict:
 
     meta["local_path"] = str(dest)
     return meta
+
+
+def download_audio(url: str, dest: Path, *, audio_format: str = "mp3", on_log=None) -> dict:
+    """Download audio-only from ``url``, transcode to ``audio_format``, save to ``dest``.
+
+    Uses yt-dlp's extract-audio postprocessor (requires ffmpeg on PATH, same implicit
+    dependency as the mp4 merge in ``download``). Returns metadata with ``local_path``.
+    """
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    meta = probe(url)
+    if on_log:
+        on_log(f"Downloading audio: {meta['title']} ({meta['duration']}s)")
+
+    # -x rewrites the output extension, so template with %(ext)s and point at the stem.
+    out_template = str(dest.with_suffix(f".%(ext)s"))
+    cmd = YT_DLP + [
+        "-x",
+        "--audio-format", audio_format,
+        "--audio-quality", "0",
+        "-f", "bestaudio/best",
+        "-o", out_template,
+        "--no-playlist",
+        "--newline",
+        url,
+    ]
+    process = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding="utf-8", errors="replace",
+    )
+    for line in process.stdout:
+        line = line.rstrip()
+        if line and on_log:
+            on_log(line)
+    process.wait()
+    if process.returncode != 0:
+        raise RuntimeError(f"yt-dlp audio download failed (exit {process.returncode}) for {url}")
+
+    meta["local_path"] = str(dest)
+    return meta

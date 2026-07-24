@@ -5,21 +5,27 @@ Steps run in a background thread so the SSE stream can report progress live.
 """
 from __future__ import annotations
 
+import json
+import os
+import platform
 import re
+import shutil
+import subprocess
 import threading
 import unicodedata
 from datetime import datetime
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Request, UploadFile
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
 
 from cutforge.api import events
 from cutforge.config.channels import list_channels
-from cutforge.models.project import VideoProject, list_runs
+from cutforge.config.settings import get_settings
+from cutforge.models.project import VideoProject, list_runs, list_runs_summary
 from cutforge.pipeline import runner
 from cutforge.pipeline.steps import wizard_state
 from cutforge.services import song_service
@@ -43,7 +49,7 @@ def create_app() -> FastAPI:
     @app.get("/", response_class=HTMLResponse)
     def index(request: Request):
         return templates.TemplateResponse(request, "index.html", {
-            "runs": list_runs(),
+            "runs": list_runs_summary(),
             "channels": list_channels(),
         })
 
@@ -83,12 +89,33 @@ def create_app() -> FastAPI:
                                   runner.error_ids(run_id)),
         }
 
+    @app.delete("/api/runs/{run_id}")
+    def delete_run(run_id: str):
+        project = VideoProject.load(run_id)
+        run_dir = project.run_dir.resolve()
+        output_dir = get_settings().output_dir.resolve()
+        # Guard against path traversal — only delete inside the output dir.
+        if output_dir not in run_dir.parents:
+            return JSONResponse({"error": "invalid run path"}, status_code=400)
+        shutil.rmtree(run_dir, ignore_errors=True)
+        return {"status": "deleted", "run_id": run_id}
+
     # ---- Lyrics: genre suggestions (synchronous — quick) ----
     @app.post("/api/runs/{run_id}/suggest-genres")
     def suggest_genres(run_id: str):
         project = VideoProject.load(run_id)
         suggestions = song_service.suggest_genres(project)
         return suggestions.model_dump()
+
+    # ---- Mood suggestion (stateless — used on the create screen) ----
+    @app.post("/api/suggest-mood")
+    def suggest_mood(payload: dict | None = None):
+        data = payload or {}
+        character = (data.get("character") or "").strip()
+        if not character:
+            return JSONResponse({"error": "character is required"}, status_code=400)
+        mood = song_service.suggest_mood(character, data.get("anime", ""))
+        return {"mood": mood}
 
     # ---- Run a step (background thread; progress via SSE) ----
     @app.post("/api/runs/{run_id}/steps/{step_id}")
@@ -137,6 +164,76 @@ def create_app() -> FastAPI:
                 events.unsubscribe(run_id, q)
 
         return EventSourceResponse(gen())
+
+    # ---- Step output previews ----
+    @app.get("/api/runs/{run_id}/output/lyrics")
+    def output_lyrics(run_id: str):
+        project = VideoProject.load(run_id)
+        if not project.lyrics_path.exists():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        suno = {}
+        if project.suno_prompt_path.exists():
+            suno = json.loads(project.suno_prompt_path.read_text(encoding="utf-8"))
+        return {
+            "lyrics": project.lyrics_path.read_text(encoding="utf-8"),
+            "title": suno.get("title", ""),
+            "style": suno.get("style", ""),
+            "suno_tips": suno.get("suno_tips", ""),
+        }
+
+    @app.get("/api/runs/{run_id}/output/metadata")
+    def output_metadata(run_id: str):
+        project = VideoProject.load(run_id)
+        if not project.metadata_path.exists():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return json.loads(project.metadata_path.read_text(encoding="utf-8"))
+
+    @app.get("/api/runs/{run_id}/output/reference")
+    def output_reference(run_id: str):
+        project = VideoProject.load(run_id)
+        if not project.reference_profile_path.exists():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return json.loads(project.reference_profile_path.read_text(encoding="utf-8"))
+
+    @app.get("/api/runs/{run_id}/output/thumbnail")
+    def output_thumbnail(run_id: str):
+        project = VideoProject.load(run_id)
+        if not project.thumbnail_path.exists():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return FileResponse(str(project.thumbnail_path), media_type="image/jpeg")
+
+    # ---- Open output folder in OS file explorer ----
+    @app.post("/api/runs/{run_id}/open-folder")
+    def open_folder(run_id: str):
+        project = VideoProject.load(run_id)
+        folder = str(project.run_dir)
+        system = platform.system()
+        if system == "Windows":
+            os.startfile(folder)  # noqa: S606
+        elif system == "Darwin":
+            subprocess.Popen(["open", folder])
+        else:
+            subprocess.Popen(["xdg-open", folder])
+        return {"status": "ok"}
+
+    # ---- Run summary (for index page) ----
+    @app.get("/api/runs/{run_id}/summary")
+    def run_summary(run_id: str):
+        try:
+            project = VideoProject.load(run_id)
+        except FileNotFoundError:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        steps = wizard_state(project, runner.running_ids(run_id), runner.error_ids(run_id))
+        done_count = sum(1 for s in steps if s["status"] == "done")
+        return {
+            "run_id": run_id,
+            "character": project.character,
+            "anime": project.anime,
+            "language": project.language,
+            "title": project.title,
+            "done_count": done_count,
+            "total_steps": len(steps),
+        }
 
     return app
 

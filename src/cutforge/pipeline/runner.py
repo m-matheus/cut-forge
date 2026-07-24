@@ -50,7 +50,16 @@ def _execute(step_id: str, project: VideoProject, params: dict, log: LogFn):
     from cutforge.services import (
         song_service, footage_service, alignment_service,
         caption_service, thumbnail_service, metadata_service, premiere_service,
+        reference_service,
     )
+
+    if step_id == "reference":
+        url = params.get("url")
+        if not url:
+            raise ValueError("Missing 'url' for reference analysis.")
+        profile = reference_service.analyze_reference(
+            project, url, refresh=params.get("refresh", False), on_log=log)
+        return {"bpm": profile.get("bpm"), "title": profile.get("source_title")}
 
     if step_id == "lyrics":
         genre = params.get("genre")
@@ -73,7 +82,11 @@ def _execute(step_id: str, project: VideoProject, params: dict, log: LogFn):
         return {"lines": alignment.line_count, "words": alignment.word_count}
 
     if step_id == "captions":
-        caption_service.generate_captions(project, color=params.get("color"), on_log=log)
+        caption_service.generate_captions(
+            project, color=params.get("color"),
+            style=params.get("style", "karaoke"),
+            words_per_group=int(params.get("words_per_group", 3)),
+            on_log=log)
         return {"ok": True}
 
     if step_id == "thumbnail":

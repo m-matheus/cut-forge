@@ -36,6 +36,7 @@ class VideoProject(BaseModel):
     # Filled by later steps
     title: str = ""
     footage_url: str = ""
+    reference_url: str = ""       # YouTube URL of a reference rap (optional inspiration)
 
     # --- Channel (not serialized; resolved on demand) ---
     @property
@@ -103,6 +104,31 @@ class VideoProject(BaseModel):
     def premiere_project_path(self) -> Path:
         return self.premiere_dir / "project.xml"
 
+    # --- Reference rap (optional inspiration source) ---
+    @property
+    def reference_dir(self) -> Path:
+        return self.run_dir / "reference"
+
+    @property
+    def reference_audio_path(self) -> Path:
+        return self.reference_dir / "reference.mp3"
+
+    @property
+    def reference_whisper_path(self) -> Path:
+        return self.reference_dir / "reference_whisper.json"
+
+    @property
+    def reference_lyrics_path(self) -> Path:
+        return self.reference_dir / "reference_lyrics.txt"
+
+    @property
+    def reference_rhythm_path(self) -> Path:
+        return self.reference_dir / "reference_rhythm.json"
+
+    @property
+    def reference_profile_path(self) -> Path:
+        return self.reference_dir / "reference_profile.json"
+
     # --- Persistence ---
     def save(self) -> None:
         self.run_dir.mkdir(parents=True, exist_ok=True)
@@ -131,3 +157,21 @@ def list_runs() -> list[str]:
         return []
     runs = [c.name for c in base.iterdir() if (c / PROJECT_FILE).exists()]
     return sorted(runs, reverse=True)
+
+
+def list_runs_summary() -> list[dict]:
+    """Return lightweight dicts with display info for each run, newest first."""
+    result = []
+    for run_id in list_runs():
+        try:
+            p = VideoProject.load(run_id)
+            result.append({
+                "run_id": run_id,
+                "character": p.character,
+                "anime": p.anime,
+                "language": p.language,
+                "title": p.title,
+            })
+        except Exception:
+            result.append({"run_id": run_id, "character": "", "anime": "", "language": "", "title": ""})
+    return result
