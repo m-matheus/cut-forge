@@ -41,8 +41,13 @@ def download(url: str, dest: Path, *, on_log=None) -> dict:
     if on_log:
         on_log(f"Downloading: {meta['title']} ({meta['duration']}s)")
 
+    # Force H.264 (avc1) video: Premiere Pro cannot decode AV1 (av01), which YouTube now
+    # serves inside .mp4 containers — so an [ext=mp4] filter alone lets AV1 through and the
+    # clip imports as "Media offline". avc1 is universally supported. Fall back to any mp4
+    # (then anything) only if no H.264 rendition exists.
     cmd = YT_DLP + [
-        "-f", "bestvideo[ext=mp4][height<=1080]+bestaudio[ext=m4a]/best[ext=mp4][height<=1080]/best",
+        "-f", "bestvideo[vcodec^=avc1][height<=1080]+bestaudio[ext=m4a]/"
+              "best[vcodec^=avc1][height<=1080]/best[ext=mp4][height<=1080]/best",
         "--merge-output-format", "mp4",
         "-o", str(dest),
         "--no-playlist",
