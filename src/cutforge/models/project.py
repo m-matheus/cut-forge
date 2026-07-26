@@ -37,7 +37,6 @@ class VideoProject(BaseModel):
     title: str = ""
     footage_url: str = ""
     reference_url: str = ""       # YouTube URL of a reference rap (optional inspiration)
-    caption_offset: float = 0.0   # seconds to shift all caption timestamps forward (positive = delay)
 
     # --- Channel (not serialized; resolved on demand) ---
     @property

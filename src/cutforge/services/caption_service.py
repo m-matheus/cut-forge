@@ -333,9 +333,6 @@ def generate_captions(project: VideoProject, alignment: Alignment | None = None,
         color = channel.captions.color_for_mood(project.mood)
     unsung = channel.captions.unsung_color
 
-    if project.caption_offset:
-        alignment = alignment.shifted(project.caption_offset)
-
     if style == "kinetic":
         ass = build_ass_music_kinetic(alignment.lines, color=color, unsung=unsung,
                                       words_per_group=words_per_group)

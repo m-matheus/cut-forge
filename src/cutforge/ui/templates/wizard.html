@@ -10,7 +10,7 @@
 </nav>
 
 <article
-  x-data='wizard("{{ project.run_id }}", {{ steps | tojson }}, {{ {"footageUrl": project.footage_url, "referenceUrl": project.reference_url, "captionOffset": project.caption_offset} | tojson }})'
+  x-data='wizard("{{ project.run_id }}", {{ steps | tojson }}, {{ {"footageUrl": project.footage_url, "referenceUrl": project.reference_url} | tojson }})'
   x-init="init()">
 
   <hgroup>
@@ -157,12 +157,6 @@
                     <option>orange</option><option>red</option><option>white</option>
                   </select>
                 </label>
-                <label>Offset (s)
-                  <input type="number" step="0.1" min="-5" max="5" x-model.number="captionOffset"
-                         style="width:6rem"
-                         @change="saveCaptionOffset()">
-                  <small class="muted">positivo = atrasa a legenda</small>
-                </label>
                 <button @click="runStep('captions', { color: captionColor, style: captionStyle })"
                         :disabled="step.status==='locked' || running"
                         :aria-busy="running && current==='captions'">Gerar captions</button>
@@ -275,7 +269,6 @@ function wizard(runId, initialSteps, saved) {
     referenceUrl: saved.referenceUrl || '',
     captionColor: '',
     captionStyle: 'karaoke',
-    captionOffset: saved.captionOffset || 0,
     genreBadge: '',
     trackUploaded: false,
     lyricsTab: 'generate',
@@ -412,14 +405,6 @@ function wizard(runId, initialSteps, saved) {
 
     async openFolder() {
       await fetch(`/api/runs/${this.runId}/open-folder`, { method: 'POST' });
-    },
-
-    async saveCaptionOffset() {
-      await fetch(`/api/runs/${this.runId}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ caption_offset: this.captionOffset }),
-      });
     },
 
     copyText(text) {
