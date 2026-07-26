@@ -88,14 +88,25 @@ def build_srt(lines: list[LyricLine], *, words_per_group: int = 3) -> str:
                 "text": text,
             })
 
+    # Maximum seconds a caption may stay on screen past its last word's end.
+    # This prevents a phrase from holding through a long instrumental break when
+    # the next group is many seconds away.
+    MAX_HOLD_AFTER_WORD = 1.5
+
     out = []
     for i, grp in enumerate(groups):
         start = grp["start"]
+        word_end = grp["word_end"]
         # End when the next group begins so there's no gap; the last group holds a beat.
         if i + 1 < len(groups):
-            end = max(groups[i + 1]["start"], start + 0.3)
+            raw_end = max(groups[i + 1]["start"], start + 0.3)
         else:
-            end = max(grp["word_end"], start + 0.8)
+            raw_end = max(word_end, start + 0.8)
+        # Never let the caption linger more than MAX_HOLD_AFTER_WORD seconds past the
+        # actual last word's end — this is what prevents the instrumental-break overrun.
+        end = min(raw_end, word_end + MAX_HOLD_AFTER_WORD)
+        # Ensure a minimum on-screen time even when word_end is very close to start.
+        end = max(end, start + 0.3)
         out.append(
             f"{i + 1}\n"
             f"{seconds_to_srt_time(start)} --> {seconds_to_srt_time(end)}\n"
@@ -207,7 +218,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
             text = w.word.upper().replace("{", "").replace("}", "")
             parts.append(f"{{\\k{dur_cs}}}{text} ")
         text_line = "".join(parts).rstrip()
-        line_end = line_start + elapsed_cs / 100.0
+        # Derive line_end from the last word's actual end timestamp so the Dialogue
+        # event closes when singing stops, not from the accumulated (and capped) \k
+        # durations which can overshoot or undershoot when words span a packed gap.
+        line_end = words[-1].end
         out.append(
             f"Dialogue: 0,{seconds_to_ass_time(line_start)},{seconds_to_ass_time(line_end)},"
             f"Karaoke,,0,0,0,,{text_line}"
@@ -272,7 +286,10 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"
                 text = w.word.upper().replace("{", "").replace("}", "")
                 parts.append(f"{{\\k{dur_cs}}}{text} ")
             text_line = "".join(parts).rstrip()
-            highlight_end = group_start + elapsed_cs / 100.0
+            # Use the last word's actual end timestamp (not accumulated elapsed_cs) so
+            # the highlight window closes when singing stops rather than overshooting
+            # across a packed gap.
+            highlight_end = group[-1].end
             groups.append({"start": group_start, "highlight_end": highlight_end, "text": text_line})
 
     # Pop-in bounce: scale 130 -> 100 over 130ms at the center anchor.

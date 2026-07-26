@@ -174,8 +174,19 @@ def _interpolate_gaps(aligned: list, clean_words: list[str], timed_words: list[d
         i = j
 
 
-def build_lines(display_lines: list[list[str]], aligned_flat: list[dict]) -> list[LyricLine]:
-    """Regroup the flat aligned word list back into display lines."""
+def build_lines(display_lines: list[list[str]], aligned_flat: list[dict],
+                gap_threshold: float = 2.0) -> list[LyricLine]:
+    """Regroup the flat aligned word list back into display lines.
+
+    Lines are split further if consecutive words within a display line are
+    separated by more than ``gap_threshold`` seconds.  This happens when
+    ``_interpolate_gaps`` packed words after a long instrumental break, leaving
+    an isolated early-matched word (e.g. "I'm" at 10s) followed by the rest of
+    the phrase packed at 42s.  Without splitting, the resulting LyricLine would
+    span 10s–46s and every caption builder would show the text across the entire
+    instrumental break.  After splitting, each LyricLine covers only a
+    contiguous sung segment, and the silence between segments is genuinely blank.
+    """
     lines: list[LyricLine] = []
     idx = 0
     for words in display_lines:
@@ -184,12 +195,28 @@ def build_lines(display_lines: list[list[str]], aligned_flat: list[dict]) -> lis
         idx += n
         if not chunk:
             continue
-        lines.append(LyricLine(
-            start=round(chunk[0]["start"], 3),
-            end=round(chunk[-1]["end"], 3),
-            words=[LyricWord(word=w["word"], start=round(w["start"], 3), end=round(w["end"], 3))
-                   for w in chunk],
-        ))
+        # Walk the chunk and emit a new LyricLine whenever there is a large gap
+        # between consecutive words.
+        segment_start = 0
+        for k in range(1, len(chunk)):
+            gap = chunk[k]["start"] - chunk[k - 1]["end"]
+            if gap > gap_threshold:
+                seg = chunk[segment_start:k]
+                lines.append(LyricLine(
+                    start=round(seg[0]["start"], 3),
+                    end=round(seg[-1]["end"], 3),
+                    words=[LyricWord(word=w["word"], start=round(w["start"], 3),
+                                     end=round(w["end"], 3)) for w in seg],
+                ))
+                segment_start = k
+        seg = chunk[segment_start:]
+        if seg:
+            lines.append(LyricLine(
+                start=round(seg[0]["start"], 3),
+                end=round(seg[-1]["end"], 3),
+                words=[LyricWord(word=w["word"], start=round(w["start"], 3),
+                                  end=round(w["end"], 3)) for w in seg],
+            ))
     return lines
 
 
