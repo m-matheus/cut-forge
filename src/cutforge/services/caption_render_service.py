@@ -74,12 +74,24 @@ def render_caption_overlay(project: VideoProject, *, duration_s: float | None = 
     out_path = project.captions_overlay_path
     escaped = _escape_ass_path(kinetic_ass_path)
 
-    # Transparent lavfi canvas -> burn ASS -> ProRes 4444 with alpha (yuva444p10le).
+    # The libass `ass` filter composites onto an OPAQUE frame — feeding it color@0.0
+    # still yields alpha=255 everywhere (the transparent background is lost), so the
+    # overlay would cover the footage as solid black. Instead we render the ASS on solid
+    # black, then rebuild the alpha channel from luminance: bright text -> opaque, black
+    # background -> transparent (alphamerge). ProRes 4444 (yuva444p10le) carries the alpha
+    # so Premiere composites only the text over the footage.
+    filter_complex = (
+        f"[0]ass='{escaped}'[t];"
+        f"[t]split[t1][t2];"
+        f"[t2]format=gray,geq=lum='clip(lum(X,Y)*3,0,255)'[a];"
+        f"[t1][a]alphamerge[out]"
+    )
     cmd = [
         "ffmpeg", "-y",
         "-f", "lavfi",
-        "-i", f"color=c=black@0.0:s={w}x{h}:r={fps:g}:d={duration_s:.3f}",
-        "-vf", f"format=rgba,ass='{escaped}'",
+        "-i", f"color=c=black:s={w}x{h}:r={fps:g}:d={duration_s:.3f}",
+        "-filter_complex", filter_complex,
+        "-map", "[out]",
         "-c:v", "prores_ks", "-profile:v", "4444", "-pix_fmt", "yuva444p10le",
         str(out_path),
     ]

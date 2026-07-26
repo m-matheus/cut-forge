@@ -76,6 +76,15 @@ def build_project(project: VideoProject, *, captions_overlay: bool = False,
         on_log(f"Song duration {duration_s:.1f}s -> {total_frames} frames @ {fps:.0f}fps")
 
     timeline = otio.schema.Timeline(name=project.title or project.run_id)
+    # Pin the sequence resolution so Premiere doesn't guess a default and scale every
+    # clip: declare <format><samplecharacteristics><width/><height/> via the adapter's
+    # fcp_xml metadata namespace. Without this the 1080p title/caption overlays can appear
+    # zoomed-in (cropped) if Premiere builds the sequence at a different size.
+    seq_w = int(project.channel.video.width)
+    seq_h = int(project.channel.video.height)
+    timeline.metadata["fcp_xml"] = {"media": {"video": {"format": {
+        "samplecharacteristics": {"width": seq_w, "height": seq_h}
+    }}}}
 
     # V1 — footage (whole clip; user cuts in Premiere)
     video_track = otio.schema.Track(name="V1", kind=otio.schema.TrackKind.Video)

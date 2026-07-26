@@ -35,6 +35,19 @@ def _load_font(size: int):
     return ImageFont.load_default()
 
 
+def _fit_font(draw, text, start_size, max_width):
+    """Return the largest font (<= start_size) whose rendered ``text`` fits ``max_width``."""
+    from PIL import ImageFont
+    size = start_size
+    while size > 24:
+        font = _load_font(size)
+        bbox = draw.textbbox((0, 0), text, font=font)
+        if (bbox[2] - bbox[0]) <= max_width:
+            return font
+        size -= 4
+    return _load_font(size)
+
+
 def _hex_to_rgb(color: str) -> tuple[int, int, int]:
     c = color.strip().lstrip("#")
     if len(c) == 6:
@@ -84,8 +97,10 @@ def generate_title_card(project: VideoProject, *, on_log=None) -> Path:
         subtitle_parts.append(project.anime)
     subtitle = "  |  ".join(subtitle_parts)
 
-    title_font = _load_font(110)
-    subtitle_font = _load_font(52)
+    # Shrink to fit ~85% of the frame width so a long song title never overflows.
+    max_text_w = int(w * 0.85)
+    title_font = _fit_font(draw, title, 110, max_text_w)
+    subtitle_font = _fit_font(draw, subtitle, 52, max_text_w)
     accent = _hex_to_rgb(channel.brand.primary_color) + (255,)
 
     _draw_centered(draw, title, title_font, cx, h // 2 - 90, fill=(255, 255, 255, 255))
