@@ -10,7 +10,7 @@
 </nav>
 
 <article
-  x-data='wizard("{{ project.run_id }}", {{ steps | tojson }})'
+  x-data='wizard("{{ project.run_id }}", {{ steps | tojson }}, {{ {"footageUrl": project.footage_url, "referenceUrl": project.reference_url} | tojson }})'
   x-init="init()">
 
   <hgroup>
@@ -215,6 +215,13 @@
               </div>
             </template>
 
+            <!-- Redo button on any completed step -->
+            <template x-if="step.status==='done'">
+              <button class="secondary outline redo-btn" @click="redoStep(step)"
+                      :disabled="running"
+                      :aria-busy="running && current===step.id">↻ Refazer</button>
+            </template>
+
             <!-- Retry button on error -->
             <template x-if="step.status==='error'">
               <button class="secondary outline retry-btn" @click="runStep(step.id, {}, true)"
@@ -246,7 +253,8 @@
 </article>
 
 <script>
-function wizard(runId, initialSteps) {
+function wizard(runId, initialSteps, saved) {
+  saved = saved || {};
   return {
     runId,
     steps: initialSteps,
@@ -257,8 +265,8 @@ function wizard(runId, initialSteps) {
     busy: { suggest: false },
     genres: [],
     chosenGenre: '',
-    footageUrl: '',
-    referenceUrl: '',
+    footageUrl: saved.footageUrl || '',
+    referenceUrl: saved.referenceUrl || '',
     captionColor: '',
     captionStyle: 'karaoke',
     genreBadge: '',
@@ -350,6 +358,16 @@ function wizard(runId, initialSteps) {
     confirmRun(stepId, params, warning) {
       if (!confirm(warning + '\n\nContinuar?')) return;
       this.runStep(stepId, params);
+    },
+
+    redoStep(step) {
+      // Re-run a completed step, forcing over the existing output. footage/reference
+      // need their URL back — reuse the one saved in project.json (seeded into state).
+      let params = {};
+      if (step.id === 'footage') params = { url: this.footageUrl };
+      else if (step.id === 'reference') params = { url: this.referenceUrl };
+      if (!confirm('Isso vai refazer o passo e substituir a saída atual.\n\nContinuar?')) return;
+      this.runStep(step.id, params, true);
     },
 
     generateLyrics(step) {
