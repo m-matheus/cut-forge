@@ -51,14 +51,8 @@ def _file_url(path: Path) -> str:
     return uri.replace("file:///", "file://localhost/", 1)
 
 
-def build_project(project: VideoProject, *, captions_overlay: bool = False,
-                  on_log=None) -> Path:
-    """Build the Premiere-importable FCP7 XML for the run. Returns the .xml path.
-
-    If ``captions_overlay`` is True, render the kinetic captions to a transparent
-    ProRes .mov (ffmpeg) and add it as a V3 track above the footage. This is off by
-    default because the render is slow and the .mov is large.
-    """
+def build_project(project: VideoProject, *, on_log=None) -> Path:
+    """Build the Premiere-importable FCP7 XML for the run. Returns the .xml path."""
     import opentimelineio as otio
     from opentimelineio.opentime import RationalTime, TimeRange
 
@@ -122,26 +116,7 @@ def build_project(project: VideoProject, *, captions_overlay: bool = False,
         source_range=title_range,
     ))
 
-    # V3 — kinetic caption overlay (optional). A transparent ProRes .mov spanning the
-    # whole song; Premiere composites its alpha so only the animated text shows. Same
-    # samplecharacteristics passthrough as V2 so it links reliably.
-    caption_track = None
-    if captions_overlay:
-        from cutforge.services import caption_render_service
-        overlay_path = caption_render_service.render_caption_overlay(
-            project, duration_s=duration_s, on_log=on_log)
-        caption_track = otio.schema.Track(name="V3", kind=otio.schema.TrackKind.Video)
-        caption_track.append(otio.schema.Clip(
-            name="captions",
-            media_reference=otio.schema.ExternalReference(
-                target_url=_file_url(overlay_path),
-                available_range=full_range,
-                metadata={"fcp_xml": {"media": {"video": {
-                    "samplecharacteristics": {"width": tc_w, "height": tc_h}
-                }}}},
-            ),
-            source_range=full_range,
-        ))
+    # A1 — song
     audio_track = otio.schema.Track(name="A1", kind=otio.schema.TrackKind.Audio)
     audio_clip = otio.schema.Clip(
         name="track",
@@ -155,8 +130,6 @@ def build_project(project: VideoProject, *, captions_overlay: bool = False,
 
     timeline.tracks.append(video_track)
     timeline.tracks.append(title_track)
-    if caption_track is not None:
-        timeline.tracks.append(caption_track)
     timeline.tracks.append(audio_track)
 
     # Markers at each lyric-line start (cut on the beat)

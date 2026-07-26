@@ -81,9 +81,9 @@ class VideoProject(BaseModel):
         return self.audio_dir / "captions.srt"
 
     @property
-    def captions_overlay_path(self) -> Path:
-        # Transparent ProRes 4444 .mov of the kinetic captions, for a V3 overlay track.
-        return self.audio_dir / "captions_overlay.mov"
+    def premiere_transcript_path(self) -> Path:
+        # Adobe Premiere transcript JSON (schema v1.0.0) for Text panel > Import transcript.
+        return self.audio_dir / "premiere_transcript.json"
 
     @property
     def footage_dir(self) -> Path:

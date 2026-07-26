@@ -60,26 +60,102 @@ def seconds_to_srt_time(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-def build_srt(lines: list[LyricLine]) -> str:
-    """Build a plain-text SRT (one entry per lyric line) for Premiere's native importer.
+def build_srt(lines: list[LyricLine], *, words_per_group: int = 3) -> str:
+    """Build an SRT segmented into short UPPERCASE phrase groups for Premiere's importer.
 
-    SRT carries no per-word karaoke highlight — it's static text per line. The whole-line
-    timing comes from the alignment's ``line.start``/``line.end``.
+    Instead of one caption per whole lyric line, split each line into groups of
+    ``words_per_group`` words (default 3) — punchy, music-video style. Timing comes from
+    the per-word alignment: a group shows from its first word's start until the next
+    group's start (or the last word's end), so captions swap in sync with the vocal.
+    Premiere reads this SRT natively as an editable caption track ("Create captions from
+    file"); the segmentation here is what determines the on-screen style, not Premiere's
+    import settings.
     """
-    out = []
-    idx = 1
+    # Flatten to groups, never crossing a line boundary (keeps phrasing musical).
+    groups: list[dict] = []
     for line in lines:
-        text = line.text.strip()
-        if not text:
+        words = line.words
+        if not words:
             continue
-        end = line.end if line.end > line.start else line.start + 1.0
+        for g in range(0, len(words), words_per_group):
+            chunk = words[g:g + words_per_group]
+            text = " ".join(w.word for w in chunk).upper().strip()
+            if not text:
+                continue
+            groups.append({
+                "start": chunk[0].start,
+                "word_end": chunk[-1].end,
+                "text": text,
+            })
+
+    out = []
+    for i, grp in enumerate(groups):
+        start = grp["start"]
+        # End when the next group begins so there's no gap; the last group holds a beat.
+        if i + 1 < len(groups):
+            end = max(groups[i + 1]["start"], start + 0.3)
+        else:
+            end = max(grp["word_end"], start + 0.8)
         out.append(
-            f"{idx}\n"
-            f"{seconds_to_srt_time(line.start)} --> {seconds_to_srt_time(end)}\n"
-            f"{text}"
+            f"{i + 1}\n"
+            f"{seconds_to_srt_time(start)} --> {seconds_to_srt_time(end)}\n"
+            f"{grp['text']}"
         )
-        idx += 1
     return "\n\n".join(out) + "\n"
+
+
+# Fixed speaker UUID (v4 shape) for the single "vocalist" — deterministic so re-runs are
+# reproducible (no random UUID that would churn the file each time).
+_SPEAKER_ID = "9f1e6c00-4a2b-4c3d-8e5f-0a1b2c3d4e5f"
+
+
+def build_premiere_transcript(lines: list[LyricLine], *, language: str = "en-us",
+                              speaker_name: str = "Vocals") -> dict:
+    """Build an Adobe Premiere transcript (schema v1.0.0) for Text panel > Import transcript.
+
+    Premiere ingests a transcript JSON (NOT srt/ass) and then generates a caption track
+    from it via "Create captions", where the user picks max length / min duration / lines.
+    We map our per-word alignment onto the schema: one segment per lyric line, each word
+    carrying start/duration in SECONDS. Times are floats from the start of the audio.
+    """
+    _PREMIERE_LANGS = {
+        "en": "en-us", "es": "es-es", "pt": "pt-br",
+    }
+    lang = _PREMIERE_LANGS.get(language, language if "-" in language else "??-??")
+
+    segments = []
+    for line in lines:
+        words = line.words
+        if not words:
+            continue
+        word_objs = []
+        for i, w in enumerate(words):
+            start = max(0.0, float(w.start))
+            dur = max(0.0, float(w.end) - start)
+            word_objs.append({
+                "confidence": 1.0,
+                "duration": round(dur, 3),
+                "eos": i == len(words) - 1,   # last word of the line ends a "sentence"
+                "start": round(start, 3),
+                "tags": [],
+                "text": w.word,
+                "type": "word",
+            })
+        seg_start = max(0.0, float(words[0].start))
+        seg_end = max(seg_start, float(words[-1].end))
+        segments.append({
+            "duration": round(seg_end - seg_start, 3),
+            "language": lang,
+            "speaker": _SPEAKER_ID,
+            "start": round(seg_start, 3),
+            "words": word_objs,
+        })
+
+    return {
+        "language": lang,
+        "segments": segments,
+        "speakers": [{"id": _SPEAKER_ID, "name": speaker_name}],
+    }
 
 
 def resolve_caption_font() -> str:
@@ -251,13 +327,22 @@ def generate_captions(project: VideoProject, alignment: Alignment | None = None,
     project.audio_dir.mkdir(parents=True, exist_ok=True)
     project.captions_path.write_text(ass, encoding="utf-8")
 
-    # Also emit a plain SRT — Premiere imports it natively as an editable caption track
-    # (static text per line, no per-word karaoke highlight).
-    srt = build_srt(alignment.lines)
+    # Also emit a plain SRT — Premiere imports it natively as an editable caption track.
+    # Segmented into short UPPERCASE phrase groups (music-video style), not whole lines.
+    srt = build_srt(alignment.lines, words_per_group=words_per_group)
     project.captions_srt_path.write_text(srt, encoding="utf-8")
+
+    # And a Premiere transcript JSON (schema v1.0.0). This is the recommended path: in
+    # Premiere, Text panel > Transcript > Import transcript, then "Create captions" to get
+    # an editable caption track (choose max length / min duration / lines there).
+    import json
+    transcript = build_premiere_transcript(alignment.lines, language=project.language)
+    project.premiere_transcript_path.write_text(
+        json.dumps(transcript, ensure_ascii=False, indent=2), encoding="utf-8")
 
     if on_log:
         on_log(f"Captions saved: {project.captions_path.name} + {project.captions_srt_path.name} "
+               f"+ {project.premiere_transcript_path.name} "
                f"({alignment.line_count} lines, style={style_desc}, "
                f"sung={color}, unsung={unsung})")
     return ass

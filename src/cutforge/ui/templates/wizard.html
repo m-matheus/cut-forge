@@ -206,11 +206,7 @@
             <!-- PREMIERE -->
             <template x-if="step.id === 'premiere'">
               <div>
-                <label>
-                  <input type="checkbox" x-model="captionsOverlay">
-                  Gerar legendas kinéticas (overlay animado — mais lento, arquivo grande)
-                </label>
-                <button @click="runStep('premiere', { captions_overlay: captionsOverlay })"
+                <button @click="runStep('premiere', {})"
                         :disabled="step.status==='locked' || running"
                         :aria-busy="running && current==='premiere'">Exportar projeto Premiere</button>
                 <template x-if="step.status==='done'">
@@ -273,7 +269,6 @@ function wizard(runId, initialSteps, saved) {
     referenceUrl: saved.referenceUrl || '',
     captionColor: '',
     captionStyle: 'karaoke',
-    captionsOverlay: false,
     genreBadge: '',
     trackUploaded: false,
     lyricsTab: 'generate',
@@ -371,7 +366,6 @@ function wizard(runId, initialSteps, saved) {
       let params = {};
       if (step.id === 'footage') params = { url: this.footageUrl };
       else if (step.id === 'reference') params = { url: this.referenceUrl };
-      else if (step.id === 'premiere') params = { captions_overlay: this.captionsOverlay };
       if (!confirm('Isso vai refazer o passo e substituir a saída atual.\n\nContinuar?')) return;
       this.runStep(step.id, params, true);
     },
