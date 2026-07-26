@@ -40,7 +40,11 @@ def _audio_duration_seconds(path: Path) -> float:
 
 
 def _file_url(path: Path) -> str:
-    return path.resolve().as_uri()
+    # Premiere Pro's FCP7 XML importer expects an explicit ``localhost`` host on Windows:
+    # ``file://localhost/C:/…``. Python's ``Path.as_uri()`` emits a host-less ``file:///C:/…``,
+    # which Premiere mis-parses into ``\\\C:\…`` and shows as "Media offline". Insert the host.
+    uri = path.resolve().as_uri()  # file:///C:/... (or file:///home/... on POSIX)
+    return uri.replace("file:///", "file://localhost/", 1)
 
 
 def build_project(project: VideoProject, *, on_log=None) -> Path:
