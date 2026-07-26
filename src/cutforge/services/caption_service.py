@@ -151,7 +151,7 @@ def build_ass_music_kinetic(lines: list[LyricLine], *, color: str = "yellow",
     and the pop-in entrance differ. Per-word ``\\k`` spans are clamped to the same range.
     """
     play_res_x, play_res_y = 1920, 1080
-    font_size = 72
+    font_size = 96
     font_name = resolve_caption_font()
 
     sung = hex_to_ass(color)

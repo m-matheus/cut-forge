@@ -57,46 +57,87 @@ def align(clean_words: list[str], timed_words: list[dict]) -> list[dict]:
     return aligned  # type: ignore[return-value]
 
 
-def _reject_jump_anchors(aligned: list, max_rate_factor: float = 6.0,
-                         min_jump_seconds: float = 3.0) -> None:
-    """Drop spurious anchors that force an implausible forward time jump (in place)."""
-    idxs = [i for i, a in enumerate(aligned) if a is not None]
-    if len(idxs) < 3:
-        return
+def _reject_jump_anchors(aligned: list, drift_threshold: float = 0.30) -> None:
+    """Drop spurious anchors whose time-position runs far ahead of their lyric-position.
 
-    rates = []
-    for p, q in zip(idxs, idxs[1:]):
-        dt = aligned[q]["start"] - aligned[p]["start"]
-        rate = dt / (q - p)
-        if dt >= 0:
-            rates.append(rate)
-    if not rates:
+    When lyrics repeat (choruses), Whisper transcribes each repeat and the sequence
+    matcher can bind an EARLY clean word to a timestamp from a LATER repeat. Because
+    matches stay monotonic, that bad anchor drags everything after it forward — the
+    highlight freezes on the jumped word for tens of seconds and the tail lines get
+    crammed into whatever time is left.
+
+    The clean discriminator between a chorus misbinding and a legitimate long
+    instrumental break is DRIFT: for each matched anchor compare its position in the
+    lyrics (index / total) to its position in time (start / span). A chorus misbind
+    drifts far (early lyric word landing deep in the song); an instrumental break only
+    drifts modestly. Any anchor whose |time_frac - lyric_frac| exceeds ``drift_threshold``
+    is dropped so ``_interpolate_gaps`` re-spreads it between trustworthy neighbours.
+    Iterated to stability because dropping one outlier can re-expose the reference pace.
+    """
+    n = len(aligned)
+    if n < 3:
         return
-    rates.sort()
-    median_rate = rates[len(rates) // 2] or 0.01
-    cap = max(median_rate * max_rate_factor, 0.5)
 
     changed = True
     while changed:
         changed = False
         idxs = [i for i, a in enumerate(aligned) if a is not None]
-        for p, q in zip(idxs, idxs[1:]):
-            dt = aligned[q]["start"] - aligned[p]["start"]
-            span = dt / (q - p)
-            if dt > min_jump_seconds and span > cap:
-                aligned[q] = None
-                changed = True
-                break
+        if len(idxs) < 3:
+            return
+        t0 = aligned[idxs[0]]["start"]
+        t1 = aligned[idxs[-1]]["start"]
+        span_t = (t1 - t0) or 1.0
+        span_i = (idxs[-1] - idxs[0]) or 1
+
+        worst_i, worst_drift = None, drift_threshold
+        for i in idxs:
+            lyric_frac = (i - idxs[0]) / span_i
+            time_frac = (aligned[i]["start"] - t0) / span_t
+            drift = abs(time_frac - lyric_frac)
+            if drift > worst_drift:
+                worst_drift = drift
+                worst_i = i
+        if worst_i is not None:
+            aligned[worst_i] = None
+            changed = True
+
+
+def _median_matched_rate(aligned: list, default: float = 0.35) -> float:
+    """Median seconds-per-word between consecutive matched anchors (a sane singing pace)."""
+    idxs = [i for i, a in enumerate(aligned) if a is not None]
+    rates = []
+    for p, q in zip(idxs, idxs[1:]):
+        dt = aligned[q]["start"] - aligned[p]["start"]
+        if dt > 0:
+            rates.append(dt / (q - p))
+    if not rates:
+        return default
+    rates.sort()
+    return rates[len(rates) // 2] or default
 
 
 def _interpolate_gaps(aligned: list, clean_words: list[str], timed_words: list[dict]) -> None:
-    """Fill None entries by evenly spreading time between matched neighbors (in place)."""
+    """Fill None entries with timing between matched neighbours (in place).
+
+    Even-spreading a gap works when the missed words were sung continuously. But when a
+    long INSTRUMENTAL break falls inside the gap (Whisper transcribed nothing across it),
+    even-spreading smears the words across the silence, so a caption lights up long before
+    it is actually sung. Fix: cap each interpolated word to a plausible singing pace
+    (median matched rate). If the words fit the gap at that pace, keep the natural even
+    spread. If the gap is far larger than the words need (an instrumental break), PACK the
+    words to END at the next anchor — clustering them right before the vocal resumes and
+    leaving the slack as a silent lead-in rather than early-firing captions.
+    """
     n = len(aligned)
     if n == 0:
         return
 
     song_start = timed_words[0]["start"] if timed_words else 0.0
     song_end = timed_words[-1]["end"] if timed_words else 0.0
+    median_rate = _median_matched_rate(aligned)
+    # A word may run a bit longer than the median when sung slowly; allow headroom before
+    # treating the remaining span as an instrumental break to skip over.
+    per_word_cap = max(median_rate * 1.5, 0.5)
 
     i = 0
     while i < n:
@@ -111,11 +152,25 @@ def _interpolate_gaps(aligned: list, clean_words: list[str], timed_words: list[d
         if next_start < prev_end:
             next_start = prev_end
         count = j - i
-        span = (next_start - prev_end) / count if count else 0.0
-        for k in range(count):
-            s = prev_end + span * k
-            e = prev_end + span * (k + 1)
-            aligned[i + k] = {"word": clean_words[i + k], "start": round(s, 3), "end": round(e, 3)}
+        total = next_start - prev_end
+        even_span = total / count if count else 0.0
+
+        if even_span <= per_word_cap or count == 0:
+            # Words fit at a natural pace — spread evenly from prev_end.
+            for k in range(count):
+                s = prev_end + even_span * k
+                e = prev_end + even_span * (k + 1)
+                aligned[i + k] = {"word": clean_words[i + k], "start": round(s, 3), "end": round(e, 3)}
+        else:
+            # Gap far exceeds what the words need → an instrumental break sits inside it.
+            # Pack the words at per_word_cap pace to END at next_start, so captions fire
+            # just before the vocal resumes instead of over the silence.
+            block = per_word_cap * count
+            block_start = max(prev_end, next_start - block)
+            for k in range(count):
+                s = block_start + per_word_cap * k
+                e = block_start + per_word_cap * (k + 1)
+                aligned[i + k] = {"word": clean_words[i + k], "start": round(s, 3), "end": round(e, 3)}
         i = j
 
 
@@ -171,7 +226,7 @@ def align_project(project: VideoProject, *, refresh: bool = False, on_log=None) 
 
     timed_words = whisper_client.transcribe_words(
         project.track_path, cache_path=project.whisper_cache_path,
-        refresh=refresh, on_log=on_log,
+        refresh=refresh, prompt=" ".join(clean_words), on_log=on_log,
     )
     if not timed_words:
         raise RuntimeError("Whisper returned no words — cannot align.")

@@ -14,8 +14,11 @@ from pathlib import Path
 
 from cutforge.models.project import VideoProject
 
-# Font fallbacks (PIL needs a file path, not a family name).
+# Font fallbacks (PIL needs a file path, not a family name). Prefer the repo's bundled
+# Montserrat ExtraBold so the card looks identical on any machine, then system fonts.
+_BUNDLED_FONT = Path(__file__).resolve().parents[1] / "assets" / "fonts" / "Montserrat-ExtraBold.ttf"
 _FONT_CANDIDATES = [
+    str(_BUNDLED_FONT),
     r"C:\Windows\Fonts\Montserrat-ExtraBold.ttf",
     r"C:\Windows\Fonts\ariblk.ttf",          # Arial Black
     r"C:\Windows\Fonts\arialbd.ttf",         # Arial Bold

@@ -26,6 +26,12 @@ def _escape_ass_path(path) -> str:
     return re.sub(r"^([A-Za-z]):/", r"\1\\:/", ass_path)
 
 
+def _bundled_fonts_dir():
+    """Absolute path to the repo's bundled fonts dir (Montserrat ExtraBold lives here)."""
+    from pathlib import Path
+    return Path(__file__).resolve().parents[1] / "assets" / "fonts"
+
+
 def render_caption_overlay(project: VideoProject, *, duration_s: float | None = None,
                            color: str | None = None, words_per_group: int = 3,
                            on_log=None) -> "object":
@@ -73,6 +79,10 @@ def render_caption_overlay(project: VideoProject, *, duration_s: float | None = 
 
     out_path = project.captions_overlay_path
     escaped = _escape_ass_path(kinetic_ass_path)
+    # Point libass at the repo's bundled fonts so the caption renders in Montserrat
+    # ExtraBold on ANY machine — not every PC has it installed, and without it libass
+    # silently falls back to a plain system font ("sem graça").
+    fontsdir = _escape_ass_path(_bundled_fonts_dir())
 
     # The libass `ass` filter composites onto an OPAQUE frame — feeding it color@0.0
     # still yields alpha=255 everywhere (the transparent background is lost), so the
@@ -81,7 +91,7 @@ def render_caption_overlay(project: VideoProject, *, duration_s: float | None = 
     # background -> transparent (alphamerge). ProRes 4444 (yuva444p10le) carries the alpha
     # so Premiere composites only the text over the footage.
     filter_complex = (
-        f"[0]ass='{escaped}'[t];"
+        f"[0]ass='{escaped}':fontsdir='{fontsdir}'[t];"
         f"[t]split[t1][t2];"
         f"[t2]format=gray,geq=lum='clip(lum(X,Y)*3,0,255)'[a];"
         f"[t1][a]alphamerge[out]"

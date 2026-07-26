@@ -52,7 +52,7 @@ cutforge = "cutforge.ui.desktop:main"
 where = ["src"]
 
 [tool.setuptools.package-data]
-cutforge = ["ui/templates/**/*", "ui/static/**/*"]
+cutforge = ["ui/templates/**/*", "ui/static/**/*", "assets/fonts/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

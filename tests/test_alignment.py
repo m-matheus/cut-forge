@@ -40,3 +40,23 @@ def test_align_rejects_jump_anchor_from_repeated_chorus():
     starts = [r["start"] for r in result]
     assert starts == sorted(starts)
     assert all(r is not None for r in result)
+
+
+def test_interpolated_words_pack_before_vocal_after_instrumental_break():
+    # Words sung ~0-2s, then a long instrumental break, vocal resumes at 40s. The two
+    # unmatched middle words must NOT smear across the silence (appearing early); they
+    # should pack just before 40s so captions fire when singing actually resumes.
+    clean = ["intro", "line", "bridge", "word", "verse", "back"]
+    timed = [
+        {"word": "intro", "start": 0.0, "end": 0.5},
+        {"word": "line", "start": 0.5, "end": 1.0},
+        # "bridge" and "word" have no Whisper match (instrumental break swallowed them)
+        {"word": "verse", "start": 40.0, "end": 40.5},
+        {"word": "back", "start": 40.5, "end": 41.0},
+    ]
+    result = align(clean, timed)
+    assert all(r is not None for r in result)
+    # The two gap words should sit close to the 40s resume, not spread from ~1s.
+    bridge, word = result[2], result[3]
+    assert bridge["start"] > 30.0, f"gap word fired too early at {bridge['start']}s"
+    assert word["start"] < 40.0
