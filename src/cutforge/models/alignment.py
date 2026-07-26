@@ -36,6 +36,25 @@ class Alignment(BaseModel):
     def word_count(self) -> int:
         return sum(len(l.words) for l in self.lines)
 
+    def shifted(self, seconds: float) -> "Alignment":
+        """Return a copy with all timestamps shifted by ``seconds`` (positive = later)."""
+        if seconds == 0.0:
+            return self
+        new_lines = []
+        for line in self.lines:
+            new_words = [
+                LyricWord(word=w.word,
+                          start=max(0.0, round(w.start + seconds, 3)),
+                          end=max(0.0, round(w.end + seconds, 3)))
+                for w in line.words
+            ]
+            new_lines.append(LyricLine(
+                start=max(0.0, round(line.start + seconds, 3)),
+                end=max(0.0, round(line.end + seconds, 3)),
+                words=new_words,
+            ))
+        return Alignment(audio=self.audio, lines=new_lines)
+
     def to_json_dict(self) -> dict:
         """Serialize in the on-disk shape used by lyrics_alignment.json."""
         return {

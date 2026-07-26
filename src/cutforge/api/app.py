@@ -100,6 +100,16 @@ def create_app() -> FastAPI:
         shutil.rmtree(run_dir, ignore_errors=True)
         return {"status": "deleted", "run_id": run_id}
 
+    @app.patch("/api/runs/{run_id}")
+    def update_run(run_id: str, payload: dict):
+        project = VideoProject.load(run_id)
+        allowed = {"caption_offset", "footage_url", "reference_url", "title"}
+        for key, value in payload.items():
+            if key in allowed and hasattr(project, key):
+                setattr(project, key, value)
+        project.save()
+        return {"status": "ok"}
+
     # ---- Lyrics: genre suggestions (synchronous — quick) ----
     @app.post("/api/runs/{run_id}/suggest-genres")
     def suggest_genres(run_id: str):
