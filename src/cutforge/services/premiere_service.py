@@ -51,8 +51,14 @@ def _file_url(path: Path) -> str:
     return uri.replace("file:///", "file://localhost/", 1)
 
 
-def build_project(project: VideoProject, *, on_log=None) -> Path:
-    """Build the Premiere-importable FCP7 XML for the run. Returns the .xml path."""
+def build_project(project: VideoProject, *, captions_overlay: bool = False,
+                  on_log=None) -> Path:
+    """Build the Premiere-importable FCP7 XML for the run. Returns the .xml path.
+
+    If ``captions_overlay`` is True, render the kinetic captions to a transparent
+    ProRes .mov (ffmpeg) and add it as a V3 track above the footage. This is off by
+    default because the render is slow and the .mov is large.
+    """
     import opentimelineio as otio
     from opentimelineio.opentime import RationalTime, TimeRange
 
@@ -85,20 +91,48 @@ def build_project(project: VideoProject, *, on_log=None) -> Path:
 
     # V2 — title-card overlay (transparent PNG) on the opening seconds. Sits above the
     # footage; Premiere respects the PNG alpha so it reads as a title over the video.
+    # A still needs its pixel dimensions declared in the XML (unlike a video, Premiere
+    # can't infer them from the file) — pass them through the adapter's fcp_xml metadata
+    # namespace as <media><video><samplecharacteristics><width/><height/>, else the clip
+    # imports as "Media offline".
     title_card_path = title_card_service.generate_title_card(project, on_log=on_log)
     title_frames = max(1, round(min(TITLE_CARD_SECONDS, duration_s) * fps))
     title_range = TimeRange(RationalTime(0, fps), RationalTime(title_frames, fps))
+    tc_w = int(project.channel.video.width)
+    tc_h = int(project.channel.video.height)
     title_track = otio.schema.Track(name="V2", kind=otio.schema.TrackKind.Video)
     title_track.append(otio.schema.Clip(
         name="title_card",
         media_reference=otio.schema.ExternalReference(
             target_url=_file_url(title_card_path),
             available_range=title_range,
+            metadata={"fcp_xml": {"media": {"video": {
+                "samplecharacteristics": {"width": tc_w, "height": tc_h}
+            }}}},
         ),
         source_range=title_range,
     ))
 
-    # A1 — song
+    # V3 — kinetic caption overlay (optional). A transparent ProRes .mov spanning the
+    # whole song; Premiere composites its alpha so only the animated text shows. Same
+    # samplecharacteristics passthrough as V2 so it links reliably.
+    caption_track = None
+    if captions_overlay:
+        from cutforge.services import caption_render_service
+        overlay_path = caption_render_service.render_caption_overlay(
+            project, duration_s=duration_s, on_log=on_log)
+        caption_track = otio.schema.Track(name="V3", kind=otio.schema.TrackKind.Video)
+        caption_track.append(otio.schema.Clip(
+            name="captions",
+            media_reference=otio.schema.ExternalReference(
+                target_url=_file_url(overlay_path),
+                available_range=full_range,
+                metadata={"fcp_xml": {"media": {"video": {
+                    "samplecharacteristics": {"width": tc_w, "height": tc_h}
+                }}}},
+            ),
+            source_range=full_range,
+        ))
     audio_track = otio.schema.Track(name="A1", kind=otio.schema.TrackKind.Audio)
     audio_clip = otio.schema.Clip(
         name="track",
@@ -112,6 +146,8 @@ def build_project(project: VideoProject, *, on_log=None) -> Path:
 
     timeline.tracks.append(video_track)
     timeline.tracks.append(title_track)
+    if caption_track is not None:
+        timeline.tracks.append(caption_track)
     timeline.tracks.append(audio_track)
 
     # Markers at each lyric-line start (cut on the beat)

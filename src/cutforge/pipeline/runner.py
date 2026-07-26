@@ -99,7 +99,8 @@ def _execute(step_id: str, project: VideoProject, params: dict, log: LogFn):
         return {"title": meta.get("title")}
 
     if step_id == "premiere":
-        path = premiere_service.build_project(project, on_log=log)
+        path = premiere_service.build_project(
+            project, captions_overlay=params.get("captions_overlay", False), on_log=log)
         return {"path": str(path)}
 
     raise ValueError(f"Unknown step id: {step_id}")
