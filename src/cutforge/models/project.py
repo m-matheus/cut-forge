@@ -77,6 +77,10 @@ class VideoProject(BaseModel):
         return self.audio_dir / "captions.ass"
 
     @property
+    def captions_srt_path(self) -> Path:
+        return self.audio_dir / "captions.srt"
+
+    @property
     def footage_dir(self) -> Path:
         return self.run_dir / "footage"
 
@@ -103,6 +107,10 @@ class VideoProject(BaseModel):
     @property
     def premiere_project_path(self) -> Path:
         return self.premiere_dir / "project.xml"
+
+    @property
+    def title_card_path(self) -> Path:
+        return self.premiere_dir / "title_card.png"
 
     # --- Reference rap (optional inspiration source) ---
     @property

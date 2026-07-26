@@ -70,14 +70,37 @@ def test_premiere_export_roundtrip(run_project, monkeypatch):
     out = premiere_service.build_project(project)
     assert out.exists()
 
+    # The title card PNG was generated alongside the XML.
+    assert project.title_card_path.exists()
+
     # Round-trip: re-read the XML with OTIO and validate structure.
     back = otio.adapters.read_from_file(str(out), adapter_name="fcp_xml")
     video_tracks = [t for t in back.tracks if t.kind == otio.schema.TrackKind.Video]
     audio_tracks = [t for t in back.tracks if t.kind == otio.schema.TrackKind.Audio]
-    assert len(video_tracks) == 1
+    assert len(video_tracks) == 2  # V1 footage + V2 title-card overlay
     assert len(audio_tracks) == 1
 
     markers = [m for c in back.find_clips() for m in c.markers]
     assert len(markers) == 4
     names = {m.name for m in markers}
     assert "Shadow Monarch" in names
+
+
+def test_build_srt():
+    from cutforge.models.alignment import Alignment
+    from cutforge.services import caption_service
+
+    alignment = Alignment(**{
+        "lines": [
+            {"start": 1.0, "end": 2.5, "words": [
+                {"word": "Shadow", "start": 1.0, "end": 1.7},
+                {"word": "Monarch", "start": 1.7, "end": 2.5}]},
+            {"start": 3.0, "end": 4.0, "words": [
+                {"word": "Rise", "start": 3.0, "end": 4.0}]},
+        ],
+    })
+    srt = caption_service.build_srt(alignment.lines)
+    # One entry per line, comma-decimal timestamps, plain text (no \k tags).
+    assert "1\n00:00:01,000 --> 00:00:02,500\nShadow Monarch" in srt
+    assert "2\n00:00:03,000 --> 00:00:04,000\nRise" in srt
+    assert "\\k" not in srt

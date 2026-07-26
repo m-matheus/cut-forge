@@ -20,6 +20,10 @@ from pathlib import Path
 
 from cutforge.models.alignment import Alignment
 from cutforge.models.project import VideoProject
+from cutforge.services import title_card_service
+
+# Title-card intro overlay duration (seconds) on the V2 track.
+TITLE_CARD_SECONDS = 4.0
 
 
 def _audio_duration_seconds(path: Path) -> float:
@@ -79,6 +83,21 @@ def build_project(project: VideoProject, *, on_log=None) -> Path:
     )
     video_track.append(footage_clip)
 
+    # V2 — title-card overlay (transparent PNG) on the opening seconds. Sits above the
+    # footage; Premiere respects the PNG alpha so it reads as a title over the video.
+    title_card_path = title_card_service.generate_title_card(project, on_log=on_log)
+    title_frames = max(1, round(min(TITLE_CARD_SECONDS, duration_s) * fps))
+    title_range = TimeRange(RationalTime(0, fps), RationalTime(title_frames, fps))
+    title_track = otio.schema.Track(name="V2", kind=otio.schema.TrackKind.Video)
+    title_track.append(otio.schema.Clip(
+        name="title_card",
+        media_reference=otio.schema.ExternalReference(
+            target_url=_file_url(title_card_path),
+            available_range=title_range,
+        ),
+        source_range=title_range,
+    ))
+
     # A1 — song
     audio_track = otio.schema.Track(name="A1", kind=otio.schema.TrackKind.Audio)
     audio_clip = otio.schema.Clip(
@@ -92,6 +111,7 @@ def build_project(project: VideoProject, *, on_log=None) -> Path:
     audio_track.append(audio_clip)
 
     timeline.tracks.append(video_track)
+    timeline.tracks.append(title_track)
     timeline.tracks.append(audio_track)
 
     # Markers at each lyric-line start (cut on the beat)

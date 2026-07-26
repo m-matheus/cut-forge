@@ -47,6 +47,41 @@ def seconds_to_ass_time(seconds: float) -> str:
     return f"{h}:{m:02d}:{int(s):02d}.{cs:02d}"
 
 
+def seconds_to_srt_time(seconds: float) -> str:
+    """SRT timestamp: HH:MM:SS,mmm (comma decimal, milliseconds)."""
+    if seconds < 0:
+        seconds = 0.0
+    h = int(seconds // 3600)
+    m = int((seconds % 3600) // 60)
+    s = int(seconds % 60)
+    ms = round((seconds - int(seconds)) * 1000)
+    if ms == 1000:  # rounding spilled over into the next second
+        s, ms = s + 1, 0
+    return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
+
+
+def build_srt(lines: list[LyricLine]) -> str:
+    """Build a plain-text SRT (one entry per lyric line) for Premiere's native importer.
+
+    SRT carries no per-word karaoke highlight — it's static text per line. The whole-line
+    timing comes from the alignment's ``line.start``/``line.end``.
+    """
+    out = []
+    idx = 1
+    for line in lines:
+        text = line.text.strip()
+        if not text:
+            continue
+        end = line.end if line.end > line.start else line.start + 1.0
+        out.append(
+            f"{idx}\n"
+            f"{seconds_to_srt_time(line.start)} --> {seconds_to_srt_time(end)}\n"
+            f"{text}"
+        )
+        idx += 1
+    return "\n\n".join(out) + "\n"
+
+
 def resolve_caption_font() -> str:
     """Prefer Montserrat ExtraBold -> Arial Black -> Arial."""
     if os.path.exists(r"C:\Windows\Fonts\Montserrat-ExtraBold.ttf"):
@@ -215,8 +250,14 @@ def generate_captions(project: VideoProject, alignment: Alignment | None = None,
 
     project.audio_dir.mkdir(parents=True, exist_ok=True)
     project.captions_path.write_text(ass, encoding="utf-8")
+
+    # Also emit a plain SRT — Premiere imports it natively as an editable caption track
+    # (static text per line, no per-word karaoke highlight).
+    srt = build_srt(alignment.lines)
+    project.captions_srt_path.write_text(srt, encoding="utf-8")
+
     if on_log:
-        on_log(f"Captions saved: {project.captions_path.name} "
+        on_log(f"Captions saved: {project.captions_path.name} + {project.captions_srt_path.name} "
                f"({alignment.line_count} lines, style={style_desc}, "
                f"sung={color}, unsung={unsung})")
     return ass
