@@ -83,8 +83,7 @@ def _execute(step_id: str, project: VideoProject, params: dict, log: LogFn):
 
     if step_id == "captions":
         caption_service.generate_captions(
-            project, color=params.get("color"),
-            style=params.get("style", "karaoke"),
+            project,
             words_per_group=int(params.get("words_per_group", 3)),
             on_log=log)
         return {"ok": True}

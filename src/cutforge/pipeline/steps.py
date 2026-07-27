@@ -67,8 +67,8 @@ STEPS: list[Step] = [
     ),
     Step(
         id="captions",
-        label="Captions (karaokê)",
-        is_done=lambda p: p.captions_path.exists(),
+        label="Transcript Premiere",
+        is_done=lambda p: p.premiere_transcript_path.exists(),
         can_run=lambda p: p.alignment_path.exists(),
         requires_hint="Rode o alinhamento primeiro.",
     ),

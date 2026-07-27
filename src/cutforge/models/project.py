@@ -73,10 +73,6 @@ class VideoProject(BaseModel):
         return self.audio_dir / "lyrics_alignment.json"
 
     @property
-    def captions_path(self) -> Path:
-        return self.audio_dir / "captions.ass"
-
-    @property
     def captions_srt_path(self) -> Path:
         return self.audio_dir / "captions.srt"
 

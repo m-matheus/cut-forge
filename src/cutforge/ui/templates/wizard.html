@@ -144,22 +144,9 @@
             <!-- CAPTIONS -->
             <template x-if="step.id === 'captions'">
               <div>
-                <label>Estilo
-                  <select x-model="captionStyle">
-                    <option value="karaoke">Karaokê (linha na base)</option>
-                    <option value="kinetic">Kinético (centralizado, pop-in)</option>
-                  </select>
-                </label>
-                <label>Cor
-                  <select x-model="captionColor">
-                    <option value="">auto (mood)</option>
-                    <option>cyan</option><option>yellow</option>
-                    <option>orange</option><option>red</option><option>white</option>
-                  </select>
-                </label>
-                <button @click="runStep('captions', { color: captionColor, style: captionStyle })"
+                <button @click="runStep('captions', {})"
                         :disabled="step.status==='locked' || running"
-                        :aria-busy="running && current==='captions'">Gerar captions</button>
+                        :aria-busy="running && current==='captions'">Gerar transcript Premiere</button>
               </div>
             </template>
 
@@ -267,8 +254,6 @@ function wizard(runId, initialSteps, saved) {
     chosenGenre: '',
     footageUrl: saved.footageUrl || '',
     referenceUrl: saved.referenceUrl || '',
-    captionColor: '',
-    captionStyle: 'karaoke',
     genreBadge: '',
     trackUploaded: false,
     lyricsTab: 'generate',

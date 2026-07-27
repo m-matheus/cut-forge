@@ -1,50 +1,10 @@
-"""Caption service — build karaoke ASS captions from a lyric alignment.
-
-Ports ``build_ass_karaoke`` from the old ``generate_captions.py``: one Dialogue event
-per lyric line with per-word ``\\k`` highlight tags, clamped to a sane range so bad
-timestamps can't freeze or pre-fill the highlight.
-"""
+"""Caption service — build Premiere transcript and SRT from a lyric alignment."""
 from __future__ import annotations
 
-import os
+import json
 
 from cutforge.models.alignment import Alignment, LyricLine
 from cutforge.models.project import VideoProject
-
-# Named color presets (ASS format: &H00BBGGRR)
-_COLOR_PRESETS = {
-    "yellow": "&H0000FFFF",
-    "white": "&H00FFFFFF",
-    "cyan": "&H00FFFF00",
-    "red": "&H000000FF",
-    "orange": "&H000080FF",
-}
-
-MIN_K_CS = 6     # 0.06s floor — no instant flash / pre-fill
-MAX_K_CS = 250   # 2.5s ceiling — no multi-second freeze on one word
-
-
-def hex_to_ass(color_str: str) -> str:
-    """Convert a color name or #RRGGBB hex to ASS &H00BBGGRR format."""
-    c = color_str.strip().lower()
-    if c in _COLOR_PRESETS:
-        return _COLOR_PRESETS[c]
-    c = c.lstrip("#")
-    if len(c) == 6:
-        r, g, b = c[0:2], c[2:4], c[4:6]
-        return f"&H00{b.upper()}{g.upper()}{r.upper()}"
-    raise ValueError(
-        f"Unknown color: {color_str!r}. Use a name "
-        f"(yellow/white/cyan/red/orange) or #RRGGBB hex."
-    )
-
-
-def seconds_to_ass_time(seconds: float) -> str:
-    h = int(seconds // 3600)
-    m = int((seconds % 3600) // 60)
-    s = seconds % 60
-    cs = round((s - int(s)) * 100)
-    return f"{h}:{m:02d}:{int(s):02d}.{cs:02d}"
 
 
 def seconds_to_srt_time(seconds: float) -> str:
@@ -55,23 +15,13 @@ def seconds_to_srt_time(seconds: float) -> str:
     m = int((seconds % 3600) // 60)
     s = int(seconds % 60)
     ms = round((seconds - int(seconds)) * 1000)
-    if ms == 1000:  # rounding spilled over into the next second
+    if ms == 1000:
         s, ms = s + 1, 0
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
 def build_srt(lines: list[LyricLine], *, words_per_group: int = 3) -> str:
-    """Build an SRT segmented into short UPPERCASE phrase groups for Premiere's importer.
-
-    Instead of one caption per whole lyric line, split each line into groups of
-    ``words_per_group`` words (default 3) — punchy, music-video style. Timing comes from
-    the per-word alignment: a group shows from its first word's start until the next
-    group's start (or the last word's end), so captions swap in sync with the vocal.
-    Premiere reads this SRT natively as an editable caption track ("Create captions from
-    file"); the segmentation here is what determines the on-screen style, not Premiere's
-    import settings.
-    """
-    # Flatten to groups, never crossing a line boundary (keeps phrasing musical).
+    """Build an SRT segmented into short UPPERCASE phrase groups for Premiere's importer."""
     groups: list[dict] = []
     for line in lines:
         words = line.words
@@ -88,24 +38,17 @@ def build_srt(lines: list[LyricLine], *, words_per_group: int = 3) -> str:
                 "text": text,
             })
 
-    # Maximum seconds a caption may stay on screen past its last word's end.
-    # This prevents a phrase from holding through a long instrumental break when
-    # the next group is many seconds away.
     MAX_HOLD_AFTER_WORD = 1.5
 
     out = []
     for i, grp in enumerate(groups):
         start = grp["start"]
         word_end = grp["word_end"]
-        # End when the next group begins so there's no gap; the last group holds a beat.
         if i + 1 < len(groups):
             raw_end = max(groups[i + 1]["start"], start + 0.3)
         else:
             raw_end = max(word_end, start + 0.8)
-        # Never let the caption linger more than MAX_HOLD_AFTER_WORD seconds past the
-        # actual last word's end — this is what prevents the instrumental-break overrun.
         end = min(raw_end, word_end + MAX_HOLD_AFTER_WORD)
-        # Ensure a minimum on-screen time even when word_end is very close to start.
         end = max(end, start + 0.3)
         out.append(
             f"{i + 1}\n"
@@ -115,20 +58,12 @@ def build_srt(lines: list[LyricLine], *, words_per_group: int = 3) -> str:
     return "\n\n".join(out) + "\n"
 
 
-# Fixed speaker UUID (v4 shape) for the single "vocalist" — deterministic so re-runs are
-# reproducible (no random UUID that would churn the file each time).
 _SPEAKER_ID = "9f1e6c00-4a2b-4c3d-8e5f-0a1b2c3d4e5f"
 
 
 def build_premiere_transcript(lines: list[LyricLine], *, language: str = "en-us",
                               speaker_name: str = "Vocals") -> dict:
-    """Build an Adobe Premiere transcript (schema v1.0.0) for Text panel > Import transcript.
-
-    Premiere ingests a transcript JSON (NOT srt/ass) and then generates a caption track
-    from it via "Create captions", where the user picks max length / min duration / lines.
-    We map our per-word alignment onto the schema: one segment per lyric line, each word
-    carrying start/duration in SECONDS. Times are floats from the start of the audio.
-    """
+    """Build an Adobe Premiere transcript (schema v1.0.0) for Text panel > Import transcript."""
     _PREMIERE_LANGS = {
         "en": "en-us", "es": "es-es", "pt": "pt-br",
     }
@@ -146,7 +81,7 @@ def build_premiere_transcript(lines: list[LyricLine], *, language: str = "en-us"
             word_objs.append({
                 "confidence": 1.0,
                 "duration": round(dur, 3),
-                "eos": i == len(words) - 1,   # last word of the line ends a "sentence"
+                "eos": i == len(words) - 1,
                 "start": round(start, 3),
                 "tags": [],
                 "text": w.word,
@@ -169,197 +104,25 @@ def build_premiere_transcript(lines: list[LyricLine], *, language: str = "en-us"
     }
 
 
-def resolve_caption_font() -> str:
-    """Prefer Montserrat ExtraBold -> Arial Black -> Arial."""
-    if os.path.exists(r"C:\Windows\Fonts\Montserrat-ExtraBold.ttf"):
-        return "Montserrat ExtraBold"
-    if os.path.exists(r"C:\Windows\Fonts\ariblk.ttf"):
-        return "Arial Black"
-    return "Arial"
-
-
-def build_ass_karaoke(lines: list[LyricLine], *, color: str = "cyan",
-                      unsung: str = "white") -> str:
-    """Build a landscape karaoke ASS with per-word \\k highlight tags."""
-    play_res_x, play_res_y = 1920, 1080
-    font_size = 84
-    font_name = resolve_caption_font()
-
-    sung = hex_to_ass(color)
-    not_sung = hex_to_ass(unsung)
-
-    header = f"""[Script Info]
-ScriptType: v4.00+
-PlayResX: {play_res_x}
-PlayResY: {play_res_y}
-WrapStyle: 0
-ScaledBorderAndShadow: yes
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: Karaoke,{font_name},{font_size},{sung},{not_sung},&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,5,3,2,80,80,90,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"""
-
-    out = [header]
-    for line in lines:
-        words = line.words
-        if not words:
-            continue
-        line_start = line.start
-        parts = []
-        elapsed_cs = 0
-        for i, w in enumerate(words):
-            nxt = words[i + 1].start if i + 1 < len(words) else w.end
-            dur_cs = round((nxt - w.start) * 100)
-            dur_cs = max(MIN_K_CS, min(dur_cs, MAX_K_CS))
-            elapsed_cs += dur_cs
-            text = w.word.upper().replace("{", "").replace("}", "")
-            parts.append(f"{{\\k{dur_cs}}}{text} ")
-        text_line = "".join(parts).rstrip()
-        # Derive line_end from the last word's actual end timestamp so the Dialogue
-        # event closes when singing stops, not from the accumulated (and capped) \k
-        # durations which can overshoot or undershoot when words span a packed gap.
-        line_end = words[-1].end
-        out.append(
-            f"Dialogue: 0,{seconds_to_ass_time(line_start)},{seconds_to_ass_time(line_end)},"
-            f"Karaoke,,0,0,0,,{text_line}"
-        )
-    return "\n".join(out) + "\n"
-
-
-def build_ass_music_kinetic(lines: list[LyricLine], *, color: str = "yellow",
-                            unsung: str = "white", words_per_group: int = 3) -> str:
-    """Kinetic center karaoke: short phrase groups, BIG and CENTERED, pop-in bounce.
-
-    Instead of one whole lyric line pinned to the bottom, this renders short phrase
-    groups (default 3 words) big and centered, one group at a time, each popping in
-    with a scale bounce. Within a group the currently-sung word highlights in ``color``
-    while the rest stay ``unsung`` — driven by native ASS ``\\k`` tags off the per-word
-    timestamps. Reuses the same alignment data as build_ass_karaoke; only the layout
-    and the pop-in entrance differ. Per-word ``\\k`` spans are clamped to the same range.
-    """
-    play_res_x, play_res_y = 1920, 1080
-    font_size = 96
-    font_name = resolve_caption_font()
-
-    sung = hex_to_ass(color)
-    not_sung = hex_to_ass(unsung)
-
-    cx, cy = play_res_x // 2, play_res_y // 2
-
-    # \an5 = center anchor. Outline heavy + shadow for readability over footage.
-    header = f"""[Script Info]
-ScriptType: v4.00+
-PlayResX: {play_res_x}
-PlayResY: {play_res_y}
-WrapStyle: 0
-ScaledBorderAndShadow: yes
-
-[V4+ Styles]
-Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
-Style: KineticCenter,{font_name},{font_size},{sung},{not_sung},&H00000000,&H64000000,-1,0,0,0,100,100,0,0,1,6,4,5,120,120,0,1
-
-[Events]
-Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text"""
-
-    out = [header]
-
-    # Flatten to phrase groups of words_per_group, never crossing a line boundary.
-    groups = []
-    for line in lines:
-        words = line.words
-        if not words:
-            continue
-        for g in range(0, len(words), words_per_group):
-            group = words[g:g + words_per_group]
-            group_start = group[0].start
-            parts = []
-            elapsed_cs = 0
-            for i, w in enumerate(group):
-                gi = g + i
-                nxt = words[gi + 1].start if gi + 1 < len(words) else w.end
-                dur_cs = round((nxt - w.start) * 100)
-                dur_cs = max(MIN_K_CS, min(dur_cs, MAX_K_CS))
-                elapsed_cs += dur_cs
-                text = w.word.upper().replace("{", "").replace("}", "")
-                parts.append(f"{{\\k{dur_cs}}}{text} ")
-            text_line = "".join(parts).rstrip()
-            # Use the last word's actual end timestamp (not accumulated elapsed_cs) so
-            # the highlight window closes when singing stops rather than overshooting
-            # across a packed gap.
-            highlight_end = group[-1].end
-            groups.append({"start": group_start, "highlight_end": highlight_end, "text": text_line})
-
-    # Pop-in bounce: scale 130 -> 100 over 130ms at the center anchor.
-    pop = f"{{\\an5\\pos({cx},{cy})\\fscx130\\fscy130\\t(0,130,\\fscx100\\fscy100)}}"
-    for i, grp in enumerate(groups):
-        if i + 1 < len(groups):
-            next_start = groups[i + 1]["start"]
-            # Hold until the next group appears (bounded so a long gap doesn't freeze).
-            group_end = min(next_start, grp["highlight_end"] + 3.0)
-            group_end = max(group_end, min(grp["start"] + 0.30, next_start))
-        else:
-            group_end = grp["highlight_end"] + 1.0  # final phrase holds a beat
-            group_end = max(group_end, grp["start"] + 0.30)
-        out.append(
-            f"Dialogue: 0,{seconds_to_ass_time(grp['start'])},{seconds_to_ass_time(group_end)},"
-            f"KineticCenter,,0,0,0,,{pop}{grp['text']}"
-        )
-    return "\n".join(out) + "\n"
-
-
 def generate_captions(project: VideoProject, alignment: Alignment | None = None, *,
-                      color: str | None = None, style: str = "karaoke",
-                      words_per_group: int = 3, on_log=None) -> str:
-    """Write captions.ass for the run. Returns the ASS text.
-
-    ``color`` defaults to the channel's mood->color mapping for this project.
-    ``style`` is "karaoke" (bottom line, per-word highlight) or "kinetic"
-    (centered phrase groups with a pop-in bounce).
-    """
+                      words_per_group: int = 3, on_log=None) -> None:
+    """Write premiere_transcript.json and captions.srt for the run."""
     if alignment is None:
-        import json
         if not project.alignment_path.exists():
-            raise FileNotFoundError(
-                f"lyrics_alignment.json not found — run alignment first."
-            )
+            raise FileNotFoundError("lyrics_alignment.json not found — run alignment first.")
         data = json.loads(project.alignment_path.read_text(encoding="utf-8"))
         alignment = Alignment(**data)
 
-    channel = project.channel
-    if color is None:
-        color = channel.captions.color_for_mood(project.mood)
-    unsung = channel.captions.unsung_color
-
-    if style == "kinetic":
-        ass = build_ass_music_kinetic(alignment.lines, color=color, unsung=unsung,
-                                      words_per_group=words_per_group)
-        style_desc = f"kinetic-center, {words_per_group} words/group"
-    else:
-        ass = build_ass_karaoke(alignment.lines, color=color, unsung=unsung)
-        style_desc = "bottom karaoke"
-
     project.audio_dir.mkdir(parents=True, exist_ok=True)
-    project.captions_path.write_text(ass, encoding="utf-8")
 
-    # Also emit a plain SRT — Premiere imports it natively as an editable caption track.
-    # Segmented into short UPPERCASE phrase groups (music-video style), not whole lines.
     srt = build_srt(alignment.lines, words_per_group=words_per_group)
     project.captions_srt_path.write_text(srt, encoding="utf-8")
 
-    # And a Premiere transcript JSON (schema v1.0.0). This is the recommended path: in
-    # Premiere, Text panel > Transcript > Import transcript, then "Create captions" to get
-    # an editable caption track (choose max length / min duration / lines there).
-    import json
     transcript = build_premiere_transcript(alignment.lines, language=project.language)
     project.premiere_transcript_path.write_text(
         json.dumps(transcript, ensure_ascii=False, indent=2), encoding="utf-8")
 
     if on_log:
-        on_log(f"Captions saved: {project.captions_path.name} + {project.captions_srt_path.name} "
-               f"+ {project.premiere_transcript_path.name} "
-               f"({alignment.line_count} lines, style={style_desc}, "
-               f"sung={color}, unsung={unsung})")
-    return ass
+        on_log(f"Captions saved: {project.captions_srt_path.name} + "
+               f"{project.premiere_transcript_path.name} "
+               f"({alignment.line_count} lines, {words_per_group} words/group)")
