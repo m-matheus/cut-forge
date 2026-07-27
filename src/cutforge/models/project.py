@@ -37,6 +37,9 @@ class VideoProject(BaseModel):
     title: str = ""
     footage_url: str = ""
     reference_url: str = ""       # YouTube URL of a reference rap (optional inspiration)
+    # How much of the reference's CONTENT (not just rhythm) the lyrics may borrow:
+    # rhythm | light | moderate | strong  (see song_service._REFERENCE_CONTENT_RULES).
+    content_blend: str = "rhythm"
 
     # --- Channel (not serialized; resolved on demand) ---
     @property

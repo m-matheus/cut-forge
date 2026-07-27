@@ -119,24 +119,55 @@ No commentary, no quotes, no markdown — just the descriptors line.
 """
 
 
-REFERENCE_SYSTEM_ADDENDUM = """\
+# --- Reference-inspiration addenda, keyed by how much CONTENT may be borrowed ---
+# Every level shares one hard, non-negotiable anti-plagiarism floor; the levels differ
+# only in how much theme / imagery / hook-shape / phrasing may be reused.
 
-REFERENCE INSPIRATION (STRICT RULES)
-You are given a reference rap the user admires: its transcript, BPM, and flow metrics.
-Use it ONLY as a style signal. This is the load-bearing rule:
-- NEVER copy, quote, closely paraphrase, or interpolate ANY line, hook, or distinctive
-  phrase from the reference transcript. Do not reuse its rhyme scheme word-for-word.
-- NEVER reuse the reference's proper nouns, names, or brand-specific catchphrases.
-- The transcript may contain mis-heard words (auto-transcribed) — treat it as vibe only.
-What you SHOULD match:
+_REFERENCE_HARD_FLOOR = """\
+HARD FLOOR (applies at EVERY level — never violate):
+- NEVER reproduce any line, hook, or distinctive phrase from the reference transcript
+  verbatim, and never merely swap a word or two — that is still copying.
+- NEVER reuse the reference's proper nouns, character names, or brand catchphrases.
+- The transcript is auto-transcribed and may contain mis-heard words.
+ALWAYS match the reference's RHYTHM:
 - The tempo/energy feel (target roughly the given BPM) and rhythmic density.
 - The flow: line length and syllables-per-bar. Faster BPM / higher words-per-second =>
   shorter, denser lines; slower => more spacious lines.
-- The section structure and overall attitude/theme energy.
-Produce a STANDALONE, original composition about the CutForge character. It must be
-new work that merely FEELS like it shares the reference's DNA — never derivative of its
-actual words. Include a tempo tag near the target BPM in the Suno style string.
+Include a tempo tag near the target BPM in the Suno style string.
 """
+
+_REFERENCE_CONTENT_RULES = {
+    "rhythm": """\
+CONTENT: Use the reference ONLY as a rhythm/energy signal. Do NOT borrow its themes,
+imagery, message, or hook structure — write the character piece entirely from your own
+ideas. The transcript is vibe-only; treat its words as off-limits.""",
+    "light": """\
+CONTENT (light borrow): You MAY echo 1-2 of the reference's core themes and its overall
+tone, but expressed in completely fresh words. Do NOT copy its specific images or
+metaphors — invent your own that fit the CutForge character.""",
+    "moderate": """\
+CONTENT (moderate borrow): You MAY reuse the reference's core themes, its semantic field
+of imagery/metaphors, and its hook shape (e.g. a short repeating chorus, call-and-response,
+a chant) — all rewritten around the CutForge character with fresh wording. No verbatim
+phrases; the images should clearly rhyme with the reference's world without quoting it.""",
+    "strong": """\
+CONTENT (strong borrow): You MAY take the reference's themes, imagery, message and hook
+structure, follow its section arc, AND lift its most striking phrases as inspiration —
+but you MUST heavily rewrite each one (swap the vocabulary, the referents, and the angle
+so it reads as a new line about the CutForge character). Aim for "unmistakably inspired by,
+never a copy." The hard floor above still holds: no literal text, no proper nouns reused.""",
+}
+
+
+def _reference_addendum(level: str) -> str:
+    """Return the reference system-prompt addendum for a content-blend level."""
+    rules = _REFERENCE_CONTENT_RULES.get(level, _REFERENCE_CONTENT_RULES["rhythm"])
+    return (
+        "\n\nREFERENCE INSPIRATION\n"
+        "You are given a reference rap the user admires: its transcript, BPM, and flow "
+        "metrics. Produce a STANDALONE, original composition about the CutForge character.\n"
+        f"{_REFERENCE_HARD_FLOOR}\n{rules}"
+    )
 
 
 def suggest_mood(character: str, anime: str = "") -> str:
@@ -166,12 +197,15 @@ def suggest_genres(project: VideoProject) -> GenreSuggestions:
 
 
 def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
-                     reference_profile: dict | None = None) -> SongPackage:
+                     reference_profile: dict | None = None,
+                     content_blend: str = "rhythm") -> SongPackage:
     """Generate the full Suno package and write lyrics.txt + suno_prompt.json.
 
     If ``reference_profile`` is None, auto-loads a saved profile for this run (produced
-    by the optional ``reference`` step). When present, the song is written to be heavily
-    inspired by — but never derivative of — the reference rap.
+    by the optional ``reference`` step). When present, the song is inspired by the
+    reference rap; ``content_blend`` controls HOW MUCH of the reference's CONTENT
+    (themes, imagery, hook shape, phrasing) may be borrowed — from "rhythm" (rhythm
+    only, the strict default) up to "strong" (heavy thematic borrow, still non-verbatim).
     """
     # Auto-load a saved reference profile (lazy import avoids a circular dependency).
     if reference_profile is None:
@@ -195,16 +229,22 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
 
     system_prompt = GENERATE_SYSTEM_PROMPT
     if reference_profile:
-        system_prompt = GENERATE_SYSTEM_PROMPT + REFERENCE_SYSTEM_ADDENDUM
+        system_prompt = GENERATE_SYSTEM_PROMPT + _reference_addendum(content_blend)
         flow = reference_profile.get("flow", {})
+        rhythm_only = content_blend == "rhythm"
+        header = ("REFERENCE (style signal only — DO NOT COPY):" if rhythm_only
+                  else f"REFERENCE (content inspiration, blend='{content_blend}' — never copy verbatim):")
+        transcript_label = ("- Reference transcript (reference only — do not copy any line):"
+                            if rhythm_only
+                            else "- Reference transcript (content inspiration — rewrite, never copy verbatim):")
         lines.append("")
-        lines.append("REFERENCE (style signal only — DO NOT COPY):")
+        lines.append(header)
         lines.append(f"- BPM: {reference_profile.get('bpm')}")
         lines.append(f"- Time signature: {reference_profile.get('time_signature')}/4")
         lines.append(f"- Onset density: {reference_profile.get('onset_rate_per_sec')} onsets/s")
         lines.append(f"- Flow: {flow.get('words_per_sec')} words/s, "
                      f"~{flow.get('syllables_per_beat')} syllables/beat")
-        lines.append(f"- Reference transcript (reference only — do not copy any line):")
+        lines.append(transcript_label)
         lines.append(reference_profile.get("transcript", ""))
 
     lines.append("")

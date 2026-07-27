@@ -10,7 +10,7 @@
 </nav>
 
 <article
-  x-data='wizard("{{ project.run_id }}", {{ steps | tojson }}, {{ {"footageUrl": project.footage_url, "referenceUrl": project.reference_url} | tojson }})'
+  x-data='wizard("{{ project.run_id }}", {{ steps | tojson }}, {{ {"footageUrl": project.footage_url, "referenceUrl": project.reference_url, "contentBlend": project.content_blend} | tojson }})'
   x-init="init()">
 
   <hgroup>
@@ -90,6 +90,23 @@
                     </div>
                   </template>
                   <input placeholder="…ou cole um estilo Suno" x-model="chosenGenre">
+                  <template x-if="hasReference">
+                    <div class="blend-picker">
+                      <label>
+                        <small>Quanto usar da referência</small>
+                        <select x-model="contentBlend">
+                          <option value="rhythm">Só ritmo (não copia conteúdo)</option>
+                          <option value="light">Leve — ecos sutis de tema/tom</option>
+                          <option value="moderate">Moderada — tema + imagens + estilo do gancho</option>
+                          <option value="strong">Forte — tema, imagens e frases reformuladas</option>
+                        </select>
+                      </label>
+                      <small class="muted" x-show="contentBlend==='rhythm'">Apenas o BPM/flow influenciam. Nenhum tema ou imagem da referência é reaproveitado.</small>
+                      <small class="muted" x-show="contentBlend==='light'">Ecoa 1-2 temas centrais e o tom, com palavras totalmente novas.</small>
+                      <small class="muted" x-show="contentBlend==='moderate'">Reaproveita temas, o campo de imagens/metáforas e o formato do gancho — reescritos para o personagem.</small>
+                      <small class="muted" x-show="contentBlend==='strong'">Empresta tema, imagens, estrutura e frases marcantes fortemente reformuladas. Nunca copia texto literal.</small>
+                    </div>
+                  </template>
                   <button @click="generateLyrics(step)"
                           :disabled="!chosenGenre || running"
                           :aria-busy="running && current==='lyrics'">
@@ -254,6 +271,7 @@ function wizard(runId, initialSteps, saved) {
     chosenGenre: '',
     footageUrl: saved.footageUrl || '',
     referenceUrl: saved.referenceUrl || '',
+    contentBlend: saved.contentBlend || 'moderate',
     genreBadge: '',
     trackUploaded: false,
     lyricsTab: 'generate',
@@ -364,7 +382,7 @@ function wizard(runId, initialSteps, saved) {
         : 'Gerar letra chama a API Anthropic.';
       if (!confirm(msg + '\n\nContinuar?')) return;
       this.lyricsOutput = {};
-      this.runStep('lyrics', { genre: this.chosenGenre }, regenerating);
+      this.runStep('lyrics', { genre: this.chosenGenre, content_blend: this.contentBlend }, regenerating);
     },
 
     async runStep(stepId, params, force) {

@@ -65,7 +65,12 @@ def _execute(step_id: str, project: VideoProject, params: dict, log: LogFn):
         genre = params.get("genre")
         if not genre:
             raise ValueError("Missing 'genre' — pick a genre direction first.")
-        pkg = song_service.generate_package(project, genre, is_vs=params.get("is_vs", False))
+        blend = params.get("content_blend") or project.content_blend or "rhythm"
+        if blend != project.content_blend:
+            project.content_blend = blend
+            project.save()
+        pkg = song_service.generate_package(
+            project, genre, is_vs=params.get("is_vs", False), content_blend=blend)
         log(f"Song: {pkg.title}")
         return {"title": pkg.title, "style": pkg.style}
 
