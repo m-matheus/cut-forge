@@ -110,7 +110,7 @@ class VideoProject(BaseModel):
 
     @property
     def premiere_project_path(self) -> Path:
-        return self.premiere_dir / "project.xml"
+        return self.premiere_dir / f"{self.run_id}.xml"
 
     @property
     def title_card_path(self) -> Path:

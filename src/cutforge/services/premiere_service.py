@@ -15,15 +15,10 @@ Learned from round-trip testing on Python 3.13 / OTIO 0.18.1:
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 
 from cutforge.models.alignment import Alignment
 from cutforge.models.project import VideoProject
-from cutforge.services import title_card_service
-
-# Title-card intro overlay duration (seconds) on the V2 track.
-TITLE_CARD_SECONDS = 4.0
 
 
 def _audio_duration_seconds(path: Path) -> float:
@@ -82,7 +77,7 @@ def build_project(project: VideoProject, *, on_log=None) -> Path:
     song_range = TimeRange(RationalTime(0, fps), RationalTime(total_frames, fps))
 
     footage_duration_s = _video_duration_seconds(project.footage_path)
-    if footage_duration_s and footage_duration_s > duration_s:
+    if footage_duration_s and footage_duration_s > 0:
         footage_frames = max(1, round(footage_duration_s * fps))
         footage_available_range = TimeRange(RationalTime(0, fps), RationalTime(footage_frames, fps))
     else:
@@ -110,33 +105,9 @@ def build_project(project: VideoProject, *, on_log=None) -> Path:
             target_url=_file_url(project.footage_path),
             available_range=footage_available_range,
         ),
-        source_range=song_range,
+        source_range=footage_available_range,
     )
     video_track.append(footage_clip)
-
-    # V2 — title-card overlay (transparent PNG) on the opening seconds. Sits above the
-    # footage; Premiere respects the PNG alpha so it reads as a title over the video.
-    # A still needs its pixel dimensions declared in the XML (unlike a video, Premiere
-    # can't infer them from the file) — pass them through the adapter's fcp_xml metadata
-    # namespace as <media><video><samplecharacteristics><width/><height/>, else the clip
-    # imports as "Media offline".
-    title_card_path = title_card_service.generate_title_card(project, on_log=on_log)
-    title_frames = max(1, round(min(TITLE_CARD_SECONDS, duration_s) * fps))
-    title_range = TimeRange(RationalTime(0, fps), RationalTime(title_frames, fps))
-    tc_w = int(project.channel.video.width)
-    tc_h = int(project.channel.video.height)
-    title_track = otio.schema.Track(name="V2", kind=otio.schema.TrackKind.Video)
-    title_track.append(otio.schema.Clip(
-        name="title_card",
-        media_reference=otio.schema.ExternalReference(
-            target_url=_file_url(title_card_path),
-            available_range=title_range,
-            metadata={"fcp_xml": {"media": {"video": {
-                "samplecharacteristics": {"width": tc_w, "height": tc_h}
-            }}}},
-        ),
-        source_range=title_range,
-    ))
 
     # A1 — song
     audio_track = otio.schema.Track(name="A1", kind=otio.schema.TrackKind.Audio)
@@ -151,7 +122,6 @@ def build_project(project: VideoProject, *, on_log=None) -> Path:
     audio_track.append(audio_clip)
 
     timeline.tracks.append(video_track)
-    timeline.tracks.append(title_track)
     timeline.tracks.append(audio_track)
 
     # Markers at each lyric-line start (cut on the beat)
@@ -175,11 +145,6 @@ def build_project(project: VideoProject, *, on_log=None) -> Path:
     project.premiere_dir.mkdir(parents=True, exist_ok=True)
     out_path = project.premiere_project_path
     otio.adapters.write_to_file(timeline, str(out_path), adapter_name="fcp_xml")
-
-    # Copy the channel endcard alongside for convenience
-    endcard = project.channel.asset_path("endcard")
-    if endcard and endcard.exists():
-        shutil.copy2(endcard, project.premiere_dir / "endcard.png")
 
     if on_log:
         on_log(f"Premiere project written: {out_path}")
