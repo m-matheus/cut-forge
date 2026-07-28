@@ -248,7 +248,7 @@ def align_project(project: VideoProject, *, refresh: bool = False,
 
 
 def _align_stable(project: VideoProject, *, refresh: bool = False, on_log=None) -> Alignment:
-    """Alignment via stable-whisper: phonetic force-alignment, no API cost."""
+    """Alignment via stable-ts force-alignment: passes exact lyrics text to model.align()."""
     if not project.track_path.exists():
         raise FileNotFoundError(f"track.mp3 not found at {project.track_path}")
     if not project.lyrics_path.exists():
@@ -261,15 +261,18 @@ def _align_stable(project: VideoProject, *, refresh: bool = False, on_log=None) 
     if on_log:
         on_log(f"Parsed {len(display_lines)} lines, {len(clean_words)} words from lyrics.txt")
 
-    timed_words = stable_whisper_client.transcribe_words(
+    # Pass the full lyrics as text so model.align() anchors every word — no words dropped.
+    lyrics_text = " ".join(clean_words)
+    timed_words = stable_whisper_client.align_words(
         project.track_path,
+        lyrics_text,
         cache_path=project.whisper_cache_path,
         refresh=refresh,
         language=project.language,
         on_log=on_log,
     )
     if not timed_words:
-        raise RuntimeError("stable-whisper returned no words — cannot align.")
+        raise RuntimeError("stable-ts returned no words — cannot align.")
 
     aligned_flat = align(clean_words, timed_words)
     lines = build_lines(display_lines, aligned_flat)
@@ -284,7 +287,7 @@ def _align_stable(project: VideoProject, *, refresh: bool = False, on_log=None) 
     if on_log:
         matched = sum(1 for w in aligned_flat if w is not None)
         on_log(f"Aligned {alignment.line_count} lines, {alignment.word_count} words "
-               f"({matched} directly matched via stable-whisper)")
+               f"({matched}/{len(clean_words)} directly matched via stable-ts force-alignment)")
     return alignment
 
 

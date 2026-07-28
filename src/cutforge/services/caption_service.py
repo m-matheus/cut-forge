@@ -20,13 +20,14 @@ def seconds_to_srt_time(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-def build_srt(lines: list[LyricLine], *, max_chunk_duration: float = 1.5) -> str:
+def build_srt(lines: list[LyricLine], *, max_chunk_duration: float = 1.5,
+              max_words: int = 5) -> str:
     """Build an SRT respecting line boundaries, grouping words by time window.
 
     Each lyric line is never split across groups — a new group always starts at a
     new line. Within a line, words accumulate until the chunk spans max_chunk_duration
-    seconds, then a new group opens. Fast-sung lines get more words per group;
-    slow-sung lines get fewer — the display follows the actual singing pace.
+    seconds OR reaches max_words words (whichever comes first). This ensures a
+    reasonable split even when alignment timestamps are imprecise.
     """
     groups: list[dict] = []
     for line in lines:
@@ -36,7 +37,8 @@ def build_srt(lines: list[LyricLine], *, max_chunk_duration: float = 1.5) -> str
         chunk: list = []
         for word in words:
             chunk.append(word)
-            if chunk[-1].end - chunk[0].start >= max_chunk_duration:
+            duration = chunk[-1].end - chunk[0].start
+            if duration >= max_chunk_duration or len(chunk) >= max_words:
                 text = " ".join(w.word for w in chunk).upper().strip()
                 if text:
                     groups.append({"start": chunk[0].start, "word_end": chunk[-1].end, "text": text})
