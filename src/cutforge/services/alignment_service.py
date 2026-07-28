@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from difflib import SequenceMatcher
 
-from cutforge.integrations import whisper_client
+from cutforge.integrations import stable_whisper_client, whisper_client
 from cutforge.models.alignment import Alignment, LyricLine, LyricWord
 from cutforge.models.project import VideoProject
 
@@ -235,8 +235,61 @@ def enforce_monotonic(lines: list[LyricLine]) -> None:
             line.end = line.words[-1].end
 
 
-def align_project(project: VideoProject, *, refresh: bool = False, on_log=None) -> Alignment:
-    """Align the run's lyrics.txt to its track.mp3 and write lyrics_alignment.json."""
+def align_project(project: VideoProject, *, refresh: bool = False,
+                  backend: str = "stable", on_log=None) -> Alignment:
+    """Align the run's lyrics.txt to its track.mp3 and write lyrics_alignment.json.
+
+    backend='stable' uses stable-whisper (local, precise ~50ms timestamps).
+    backend='openai' uses the OpenAI Whisper API (cloud, ~500ms timestamps).
+    """
+    if backend == "stable":
+        return _align_stable(project, refresh=refresh, on_log=on_log)
+    return _align_openai(project, refresh=refresh, on_log=on_log)
+
+
+def _align_stable(project: VideoProject, *, refresh: bool = False, on_log=None) -> Alignment:
+    """Alignment via stable-whisper: phonetic force-alignment, no API cost."""
+    if not project.track_path.exists():
+        raise FileNotFoundError(f"track.mp3 not found at {project.track_path}")
+    if not project.lyrics_path.exists():
+        raise FileNotFoundError(f"lyrics.txt not found at {project.lyrics_path}")
+
+    display_lines = parse_lyrics(project.lyrics_path.read_text(encoding="utf-8"))
+    if not display_lines:
+        raise ValueError("No lyric lines found in lyrics.txt")
+    clean_words = [w for line in display_lines for w in line]
+    if on_log:
+        on_log(f"Parsed {len(display_lines)} lines, {len(clean_words)} words from lyrics.txt")
+
+    timed_words = stable_whisper_client.transcribe_words(
+        project.track_path,
+        cache_path=project.whisper_cache_path,
+        refresh=refresh,
+        language=project.language,
+        on_log=on_log,
+    )
+    if not timed_words:
+        raise RuntimeError("stable-whisper returned no words — cannot align.")
+
+    aligned_flat = align(clean_words, timed_words)
+    lines = build_lines(display_lines, aligned_flat)
+    enforce_monotonic(lines)
+
+    alignment = Alignment(audio=str(project.track_path), lines=lines)
+    import json
+    project.audio_dir.mkdir(parents=True, exist_ok=True)
+    project.alignment_path.write_text(
+        json.dumps(alignment.to_json_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
+    )
+    if on_log:
+        matched = sum(1 for w in aligned_flat if w is not None)
+        on_log(f"Aligned {alignment.line_count} lines, {alignment.word_count} words "
+               f"({matched} directly matched via stable-whisper)")
+    return alignment
+
+
+def _align_openai(project: VideoProject, *, refresh: bool = False, on_log=None) -> Alignment:
+    """Original alignment via OpenAI Whisper API."""
     if not project.track_path.exists():
         raise FileNotFoundError(
             f"track.mp3 not found at {project.track_path} — add the Suno song first."
