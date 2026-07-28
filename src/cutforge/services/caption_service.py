@@ -20,23 +20,31 @@ def seconds_to_srt_time(seconds: float) -> str:
     return f"{h:02d}:{m:02d}:{s:02d},{ms:03d}"
 
 
-def build_srt(lines: list[LyricLine], *, words_per_group: int = 3) -> str:
-    """Build an SRT segmented into short UPPERCASE phrase groups for Premiere's importer."""
+def build_srt(lines: list[LyricLine], *, max_chunk_duration: float = 1.5) -> str:
+    """Build an SRT respecting line boundaries, grouping words by time window.
+
+    Each lyric line is never split across groups — a new group always starts at a
+    new line. Within a line, words accumulate until the chunk spans max_chunk_duration
+    seconds, then a new group opens. Fast-sung lines get more words per group;
+    slow-sung lines get fewer — the display follows the actual singing pace.
+    """
     groups: list[dict] = []
     for line in lines:
         words = line.words
         if not words:
             continue
-        for g in range(0, len(words), words_per_group):
-            chunk = words[g:g + words_per_group]
+        chunk: list = []
+        for word in words:
+            chunk.append(word)
+            if chunk[-1].end - chunk[0].start >= max_chunk_duration:
+                text = " ".join(w.word for w in chunk).upper().strip()
+                if text:
+                    groups.append({"start": chunk[0].start, "word_end": chunk[-1].end, "text": text})
+                chunk = []
+        if chunk:
             text = " ".join(w.word for w in chunk).upper().strip()
-            if not text:
-                continue
-            groups.append({
-                "start": chunk[0].start,
-                "word_end": chunk[-1].end,
-                "text": text,
-            })
+            if text:
+                groups.append({"start": chunk[0].start, "word_end": chunk[-1].end, "text": text})
 
     MAX_HOLD_AFTER_WORD = 1.5
 
@@ -105,7 +113,7 @@ def build_premiere_transcript(lines: list[LyricLine], *, language: str = "en-us"
 
 
 def generate_captions(project: VideoProject, alignment: Alignment | None = None, *,
-                      words_per_group: int = 3, on_log=None) -> None:
+                      max_chunk_duration: float = 1.5, on_log=None) -> None:
     """Write premiere_transcript.json and captions.srt for the run."""
     if alignment is None:
         if not project.alignment_path.exists():
@@ -115,7 +123,7 @@ def generate_captions(project: VideoProject, alignment: Alignment | None = None,
 
     project.audio_dir.mkdir(parents=True, exist_ok=True)
 
-    srt = build_srt(alignment.lines, words_per_group=words_per_group)
+    srt = build_srt(alignment.lines, max_chunk_duration=max_chunk_duration)
     project.captions_srt_path.write_text(srt, encoding="utf-8")
 
     transcript = build_premiere_transcript(alignment.lines, language=project.language)
@@ -125,4 +133,4 @@ def generate_captions(project: VideoProject, alignment: Alignment | None = None,
     if on_log:
         on_log(f"Captions saved: {project.captions_srt_path.name} + "
                f"{project.premiere_transcript_path.name} "
-               f"({alignment.line_count} lines, {words_per_group} words/group)")
+               f"({alignment.line_count} lines, max_chunk={max_chunk_duration}s)")
