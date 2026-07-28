@@ -69,7 +69,7 @@ def create_app() -> FastAPI:
         mood: str = Form(""),
         topic: str = Form(""),
         language: str = Form("en"),
-        channel_slug: str = Form("zenkai-beats"),
+        channel_slug: str = Form("enkai"),
     ):
         date = datetime.now().strftime("%Y%m%d")
         run_id = f"{date}-{_slugify(character or topic)}"

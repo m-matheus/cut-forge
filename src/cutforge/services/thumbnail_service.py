@@ -48,7 +48,7 @@ def _build_request(project: VideoProject, genre_badge: str | None) -> str:
     badge_block = ""
     if genre_badge:
         badge_block = (
-            f"GENRE BADGE (bottom-left corner), Sensei Beats style: a small 'ZENKAI BEATS' "
+            f"GENRE BADGE (bottom-left corner), Sensei Beats style: a small 'ENKAI' "
             f"credit line above a large bold '{genre_badge.upper()}' in a heavy condensed "
             f"impact font, both on a dark semi-transparent rectangle bleeding into the "
             f"bottom-left edges."

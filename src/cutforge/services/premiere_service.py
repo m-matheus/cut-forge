@@ -43,6 +43,21 @@ def _audio_duration_seconds(path: Path) -> float:
     raise RuntimeError(f"Could not determine duration of {path}")
 
 
+def _video_duration_seconds(path: Path) -> float | None:
+    """Duration of a video file via cv2. Returns None if cv2 is unavailable or fails."""
+    try:
+        import cv2
+        cap = cv2.VideoCapture(str(path))
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        frame_count = cap.get(cv2.CAP_PROP_FRAME_COUNT)
+        cap.release()
+        if fps > 0 and frame_count > 0:
+            return frame_count / fps
+    except Exception:
+        pass
+    return None
+
+
 def _file_url(path: Path) -> str:
     # Premiere Pro's FCP7 XML importer expects an explicit ``localhost`` host on Windows:
     # ``file://localhost/C:/…``. Python's ``Path.as_uri()`` emits a host-less ``file:///C:/…``,
@@ -64,7 +79,14 @@ def build_project(project: VideoProject, *, on_log=None) -> Path:
     fps = float(project.channel.video.fps)
     duration_s = _audio_duration_seconds(project.track_path)
     total_frames = max(1, round(duration_s * fps))
-    full_range = TimeRange(RationalTime(0, fps), RationalTime(total_frames, fps))
+    song_range = TimeRange(RationalTime(0, fps), RationalTime(total_frames, fps))
+
+    footage_duration_s = _video_duration_seconds(project.footage_path)
+    if footage_duration_s and footage_duration_s > duration_s:
+        footage_frames = max(1, round(footage_duration_s * fps))
+        footage_available_range = TimeRange(RationalTime(0, fps), RationalTime(footage_frames, fps))
+    else:
+        footage_available_range = song_range
 
     if on_log:
         on_log(f"Song duration {duration_s:.1f}s -> {total_frames} frames @ {fps:.0f}fps")
@@ -86,9 +108,9 @@ def build_project(project: VideoProject, *, on_log=None) -> Path:
         name="footage",
         media_reference=otio.schema.ExternalReference(
             target_url=_file_url(project.footage_path),
-            available_range=full_range,
+            available_range=footage_available_range,
         ),
-        source_range=full_range,
+        source_range=song_range,
     )
     video_track.append(footage_clip)
 
@@ -122,9 +144,9 @@ def build_project(project: VideoProject, *, on_log=None) -> Path:
         name="track",
         media_reference=otio.schema.ExternalReference(
             target_url=_file_url(project.track_path),
-            available_range=full_range,
+            available_range=song_range,
         ),
-        source_range=full_range,
+        source_range=song_range,
     )
     audio_track.append(audio_clip)
 

@@ -24,7 +24,7 @@ class VideoProject(BaseModel):
     """Persisted run context + path resolver."""
 
     run_id: str                    # folder name, e.g. "20260722-jinwoo-shadow-monarch"
-    channel_slug: str = "zenkai-beats"
+    channel_slug: str = "enkai"
     language: str = "en"           # en | es | pt
 
     # Creative context

@@ -1,0 +1,39 @@
+{
+  "name": "ENKAI",
+  "slug": "enkai",
+  "content_type": "music",
+  "languages": ["en", "es", "pt"],
+  "brand": {
+    "primary_color": "#00E5FF",
+    "accent_color": "#FF1744",
+    "background_color": "#050505",
+    "text_color": "#FFFFFF"
+  },
+  "video": {
+    "resolution": "1920x1080",
+    "width": 1920,
+    "height": 1080,
+    "fps": 30
+  },
+  "voice": {
+    "voice_id": "JBFqnCBsd6RMkjVDRZzb",
+    "model": "eleven_v3"
+  },
+  "captions": {
+    "default_color": "cyan",
+    "unsung_color": "white",
+    "mood_colors": {
+      "action": "orange",
+      "hype": "yellow",
+      "dark": "cyan",
+      "cold": "cyan",
+      "emotional": "white",
+      "horror": "red"
+    }
+  },
+  "assets": {
+    "endcard": "assets/endcard.png",
+    "icon": "assets/icon.png"
+  },
+  "description_template": "{character} original anime song.\n\nⓘ Fan-made edit for entertainment. Anime footage belongs to its original creators/studios. No copyright infringement intended (Fair Use). Audio is an original AI-assisted production.\n\nWho should we make a track for next? Drop a comment! 宴開\n\n#{anime} #{character} #animesong #animeedit #animemusic #amv"
+}

@@ -16,16 +16,16 @@ description and tags that maximize click-through while staying honest about the 
 
 TITLE FORMAT — character name FIRST, in CAPS, so it wins the search box.
 People search "gojo rap", not the song title, so lead with the character.
-  CHARACTER RAP | "Song" | Zenkai Beats [Anime]
-  For a matchup: CHAR A VS CHAR B RAP | "Song" | Zenkai Beats [Anime1 x Anime2]
-  For a group/cypher: ANIME RAP CYPHER | "Song" | Zenkai Beats [Anime]
+  CHARACTER RAP | "Song" | Enkai [Anime]
+  For a matchup: CHAR A VS CHAR B RAP | "Song" | Enkai [Anime1 x Anime2]
+  For a group/cypher: ANIME RAP CYPHER | "Song" | Enkai [Anime]
 Use RAP for a single-artist track, CYPHER for a multi-character group track.
-Always keep the channel tag "Zenkai Beats" and put the anime name in [square brackets] at the end.
+Always keep the channel tag "Enkai" and put the anime name in [square brackets] at the end.
 Keep the quoted song title short (2-4 words). Keep the whole title under 100 characters.
 Examples of the shape (do not copy verbatim):
-  GOJO RAP | "Six Eyes" | Zenkai Beats [Jujutsu Kaisen]
-  NARUTO RAP | "Hokage" | Zenkai Beats [Naruto]
-  SANJI VS ZORO RAP | "Rivals" | Zenkai Beats [One Piece]
+  GOJO RAP | "Six Eyes" | Enkai [Jujutsu Kaisen]
+  NARUTO RAP | "Hokage" | Enkai [Naruto]
+  SANJI VS ZORO RAP | "Rivals" | Enkai [One Piece]
 
 DESCRIPTION — keep it tight (3-5 short lines):
 - Open with a one-line hook about the character/song.
