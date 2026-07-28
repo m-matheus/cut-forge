@@ -73,6 +73,24 @@
                   <template x-if="hasReference">
                     <p class="ok"><small>✓ Usando o rap de referência para inspirar o flow.</small></p>
                   </template>
+                  <template x-if="hasReference">
+                    <div class="blend-picker">
+                      <label>
+                        <small>Quanto usar da referência</small>
+                        <select x-model="contentBlend">
+                          <option value="rhythm">Só ritmo (não copia conteúdo)</option>
+                          <option value="light">Leve — ecos sutis de tema/tom</option>
+                          <option value="moderate">Moderada — tema + imagens + estilo do gancho</option>
+                          <option value="strong">Forte — tema, imagens e frases reformuladas</option>
+                        </select>
+                      </label>
+                      <small class="muted" x-show="contentBlend==='rhythm'">Apenas o BPM/flow influenciam. Nenhum tema ou imagem da referência é reaproveitado.</small>
+                      <small class="muted" x-show="contentBlend==='light'">Ecoa 1-2 temas centrais e o tom, com palavras totalmente novas.</small>
+                      <small class="muted" x-show="contentBlend==='moderate'">Reaproveita temas, o campo de imagens/metáforas e o formato do gancho — reescritos para o personagem.</small>
+                      <small class="muted" x-show="contentBlend==='strong'">Empresta tema, imagens, estrutura e frases marcantes fortemente reformuladas. Nunca copia texto literal.</small>
+                      <small class="muted">Também guia as sugestões de gênero abaixo.</small>
+                    </div>
+                  </template>
                   <button class="secondary outline" @click="suggestGenres()"
                           :aria-busy="busy.suggest" :disabled="busy.suggest">
                     Sugerir gêneros
@@ -90,23 +108,6 @@
                     </div>
                   </template>
                   <input placeholder="…ou cole um estilo Suno" x-model="chosenGenre">
-                  <template x-if="hasReference">
-                    <div class="blend-picker">
-                      <label>
-                        <small>Quanto usar da referência</small>
-                        <select x-model="contentBlend">
-                          <option value="rhythm">Só ritmo (não copia conteúdo)</option>
-                          <option value="light">Leve — ecos sutis de tema/tom</option>
-                          <option value="moderate">Moderada — tema + imagens + estilo do gancho</option>
-                          <option value="strong">Forte — tema, imagens e frases reformuladas</option>
-                        </select>
-                      </label>
-                      <small class="muted" x-show="contentBlend==='rhythm'">Apenas o BPM/flow influenciam. Nenhum tema ou imagem da referência é reaproveitado.</small>
-                      <small class="muted" x-show="contentBlend==='light'">Ecoa 1-2 temas centrais e o tom, com palavras totalmente novas.</small>
-                      <small class="muted" x-show="contentBlend==='moderate'">Reaproveita temas, o campo de imagens/metáforas e o formato do gancho — reescritos para o personagem.</small>
-                      <small class="muted" x-show="contentBlend==='strong'">Empresta tema, imagens, estrutura e frases marcantes fortemente reformuladas. Nunca copia texto literal.</small>
-                    </div>
-                  </template>
                   <button @click="generateLyrics(step)"
                           :disabled="!chosenGenre || running"
                           :aria-busy="running && current==='lyrics'">
@@ -352,7 +353,11 @@ function wizard(runId, initialSteps, saved) {
     async suggestGenres() {
       this.busy.suggest = true;
       try {
-        const r = await fetch(`/api/runs/${this.runId}/suggest-genres`, { method: 'POST' });
+        const r = await fetch(`/api/runs/${this.runId}/suggest-genres`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ content_blend: this.contentBlend }),
+        });
         const j = await r.json();
         this.genres = j.directions || [];
       } finally { this.busy.suggest = false; }

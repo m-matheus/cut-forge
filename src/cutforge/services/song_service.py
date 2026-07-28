@@ -183,14 +183,49 @@ def suggest_mood(character: str, anime: str = "") -> str:
     return text.strip().strip('"').splitlines()[0]
 
 
-def suggest_genres(project: VideoProject) -> GenreSuggestions:
-    """Return 3 genre directions for the project's character/topic."""
+def suggest_genres(project: VideoProject, *, content_blend: str | None = None) -> GenreSuggestions:
+    """Return 3 genre directions for the project's character/topic.
+
+    When the run has a reference rap AND ``content_blend`` allows borrowing content
+    (anything other than "rhythm"), the reference's tempo and musical style bias the
+    suggestions — more strongly at higher blend levels — so the genre aligns with the
+    reference instead of coming from the character alone.
+    """
+    from cutforge.services import reference_service
+
     topic = project.topic or project.character
-    user_prompt = (
-        f"Character / matchup: {topic}\n\n"
-        "Propose 3 genre/vibe directions for an original anime song about this. "
-        "Return only valid JSON."
-    )
+    blend = content_blend or project.content_blend or "rhythm"
+    profile = reference_service.load_reference_profile(project)
+
+    lines = [
+        f"Character / matchup: {topic}",
+        "",
+        "Propose 3 genre/vibe directions for an original anime song about this.",
+    ]
+    if profile and blend != "rhythm":
+        strength = {
+            "light": "Let the reference lightly inform the sonic palette, but keep the "
+                     "character's fit as the priority.",
+            "moderate": "Bias the directions toward the reference's musical style and tempo; "
+                        "the genre should clearly feel related to the reference.",
+            "strong": "Anchor the directions to the reference's genre and tempo — the song "
+                      "should sound like it belongs to the same lane as the reference.",
+        }.get(blend, "")
+        lines += [
+            "",
+            "REFERENCE (the user picked this rap to emulate — match its lane):",
+            f"- BPM: {profile.get('bpm')} (target tempo)",
+            f"- Onset density: {profile.get('onset_rate_per_sec')} onsets/s",
+            f"- Reference title: {profile.get('source_title')}",
+            f"- Transcript (infer the genre/energy from it — do NOT copy words): "
+            f"{profile.get('transcript', '')[:1200]}",
+            "",
+            strength,
+            "Every direction must still genuinely fit the character.",
+        ]
+    lines.append("Return only valid JSON.")
+    user_prompt = "\n".join(lines)
+
     data = anthropic_client.complete_json(SUGGEST_SYSTEM_PROMPT, user_prompt)
     directions = [GenreDirection(**d) for d in data.get("directions", [])]
     return GenreSuggestions(character_read=data.get("character_read", ""), directions=directions)

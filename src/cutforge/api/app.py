@@ -102,9 +102,10 @@ def create_app() -> FastAPI:
 
     # ---- Lyrics: genre suggestions (synchronous — quick) ----
     @app.post("/api/runs/{run_id}/suggest-genres")
-    def suggest_genres(run_id: str):
+    def suggest_genres(run_id: str, payload: dict | None = None):
         project = VideoProject.load(run_id)
-        suggestions = song_service.suggest_genres(project)
+        blend = (payload or {}).get("content_blend")
+        suggestions = song_service.suggest_genres(project, content_blend=blend)
         return suggestions.model_dump()
 
     # ---- Mood suggestion (stateless — used on the create screen) ----
