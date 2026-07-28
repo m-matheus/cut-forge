@@ -39,7 +39,7 @@ def _audio_duration_seconds(path: Path) -> float:
 
 
 def _video_duration_seconds(path: Path) -> float | None:
-    """Duration of a video file via cv2. Returns None if cv2 is unavailable or fails."""
+    """Duration of a video file. Tries cv2, then ffprobe."""
     try:
         import cv2
         cap = cv2.VideoCapture(str(path))
@@ -48,6 +48,18 @@ def _video_duration_seconds(path: Path) -> float | None:
         cap.release()
         if fps > 0 and frame_count > 0:
             return frame_count / fps
+    except Exception:
+        pass
+    try:
+        import json as _json
+        import subprocess
+        result = subprocess.run(
+            ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", str(path)],
+            capture_output=True, text=True, timeout=15,
+        )
+        for stream in _json.loads(result.stdout).get("streams", []):
+            if stream.get("codec_type") == "video" and stream.get("duration"):
+                return float(stream["duration"])
     except Exception:
         pass
     return None
@@ -81,10 +93,13 @@ def build_project(project: VideoProject, *, on_log=None) -> Path:
         footage_frames = max(1, round(footage_duration_s * fps))
         footage_available_range = TimeRange(RationalTime(0, fps), RationalTime(footage_frames, fps))
     else:
+        footage_frames = total_frames
+        footage_duration_s = duration_s
         footage_available_range = song_range
 
     if on_log:
         on_log(f"Song duration {duration_s:.1f}s -> {total_frames} frames @ {fps:.0f}fps")
+        on_log(f"Footage duration {footage_duration_s:.1f}s -> {footage_frames} frames")
 
     timeline = otio.schema.Timeline(name=project.title or project.run_id)
     # Pin the sequence resolution so Premiere doesn't guess a default and scale every
