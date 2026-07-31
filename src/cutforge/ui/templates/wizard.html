@@ -71,12 +71,12 @@
                 <!-- Generate tab -->
                 <div x-show="lyricsTab==='generate'">
                   <template x-if="hasReference">
-                    <p class="ok"><small>✓ Usando o rap de referência para inspirar o flow.</small></p>
+                    <p class="ok"><small>✓ Usando o rap de referência: gênero e BPM seguem a referência; o flow também.</small></p>
                   </template>
                   <template x-if="hasReference">
                     <div class="blend-picker">
                       <label>
-                        <small>Quanto usar da referência</small>
+                        <small>Quanto do conteúdo usar da referência</small>
                         <select x-model="contentBlend">
                           <option value="rhythm">Só ritmo (não copia conteúdo)</option>
                           <option value="light">Leve — ecos sutis de tema/tom</option>
@@ -88,7 +88,7 @@
                       <small class="muted" x-show="contentBlend==='light'">Ecoa 1-2 temas centrais e o tom, com palavras totalmente novas.</small>
                       <small class="muted" x-show="contentBlend==='moderate'">Reaproveita temas, o campo de imagens/metáforas e o formato do gancho — reescritos para o personagem.</small>
                       <small class="muted" x-show="contentBlend==='strong'">Empresta tema, imagens, estrutura e frases marcantes fortemente reformuladas. Nunca copia texto literal.</small>
-                      <small class="muted">Também guia as sugestões de gênero abaixo.</small>
+                      <small class="muted">O gênero sempre segue a referência; isto controla só o quanto da LETRA é inspirada nela.</small>
                     </div>
                   </template>
                   <button class="secondary outline" @click="suggestGenres()"
@@ -130,11 +130,17 @@
                       <div class="output-meta">
                         <strong x-text="lyricsOutput.title"></strong>
                         <small class="muted" x-text="lyricsOutput.style"></small>
+                        <template x-if="lyricsOutput.exclude">
+                          <small class="muted">Exclude: <span x-text="lyricsOutput.exclude"></span></small>
+                        </template>
                       </div>
                       <pre class="output-text" x-text="lyricsOutput.lyrics"></pre>
                       <button class="secondary outline copy-btn" @click="copyText(lyricsOutput.lyrics)">Copiar letra</button>
                       <template x-if="lyricsOutput.style">
                         <button class="secondary outline copy-btn" @click="copyText(lyricsOutput.style)">Copiar estilo Suno</button>
+                      </template>
+                      <template x-if="lyricsOutput.exclude">
+                        <button class="secondary outline copy-btn" @click="copyText(lyricsOutput.exclude)">Copiar exclude</button>
                       </template>
                     </div>
                   </details>

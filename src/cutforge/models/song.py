@@ -23,6 +23,9 @@ class SongPackage(BaseModel):
     title: str
     style: str
     lyrics: str
+    # Suno "Exclude Styles" field — kills drift (e.g. "singing, melodic vocals, auto-tune"
+    # keeps a rap track from turning into sung mush). Paste into Suno's Exclude box.
+    exclude: str = ""
     suno_tips: str = ""
     # Context echoed back for later steps (thumbnail, metadata).
     topic: str = ""

@@ -179,6 +179,7 @@ def create_app() -> FastAPI:
             "lyrics": project.lyrics_path.read_text(encoding="utf-8"),
             "title": suno.get("title", ""),
             "style": suno.get("style", ""),
+            "exclude": suno.get("exclude", ""),
             "suno_tips": suno.get("suno_tips", ""),
         }
 
