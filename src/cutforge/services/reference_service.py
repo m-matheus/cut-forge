@@ -4,14 +4,15 @@ Produces a small "reference profile" (lyrics transcript + BPM + flow metrics) th
 lyrics-generation step (``song_service.generate_package``) detects on disk and uses to
 write an ORIGINAL, non-infringing song with a matching flow/energy/structure.
 
-Reuses ``youtube_dl.download_audio`` (audio-only fetch), ``whisper_client.transcribe_words``
-(word timestamps, cached) and ``librosa_client.analyze_rhythm`` (BPM/beat, cached).
+Reuses ``youtube_dl.download_audio`` (audio-only fetch), ``stable_whisper_client.transcribe_words``
+(local stable-ts transcription with anti-repetition flags, cached) and
+``librosa_client.analyze_rhythm`` (BPM/beat, cached).
 """
 from __future__ import annotations
 
 import json
 
-from cutforge.integrations import librosa_client, whisper_client, youtube_dl
+from cutforge.integrations import librosa_client, stable_whisper_client, youtube_dl
 from cutforge.models.project import VideoProject
 
 
@@ -31,11 +32,15 @@ def analyze_reference(project: VideoProject, url: str, *, refresh: bool = False,
     # 1. Download audio-only.
     meta = youtube_dl.download_audio(url, project.reference_audio_path, on_log=log)
 
-    # 2. Transcribe (cached).
-    words = whisper_client.transcribe_words(
+    # 2. Transcribe (cached). Use stable-ts transcribe() with anti-repetition flags:
+    #    cloud whisper-1 loops on musical/instrumental sections and echoes the last
+    #    recognised phrase (e.g. an intro channel promo), spamming the transcript and
+    #    swallowing the real lyrics. language=None auto-detects the reference's language.
+    words = stable_whisper_client.transcribe_words(
         project.reference_audio_path,
         cache_path=project.reference_whisper_path,
         refresh=refresh,
+        language=None,
         on_log=log,
     )
     transcript = _reconstruct_lyrics(words)
