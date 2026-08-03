@@ -37,8 +37,9 @@ class VideoProject(BaseModel):
     title: str = ""
     footage_url: str = ""
     reference_url: str = ""       # YouTube URL of a reference rap (optional inspiration)
-    # How much of the reference's CONTENT (not just rhythm) the lyrics may borrow:
-    # rhythm | light | moderate | strong  (see song_service._REFERENCE_CONTENT_RULES).
+    # DEPRECATED — kept only so old project.json files still load. The reference's
+    # lyrical CONTENT is never borrowed anymore: the transcript feeds lore mining and
+    # the final song is always an original composition. No longer read by any service.
     content_blend: str = "rhythm"
 
     # --- Channel (not serialized; resolved on demand) ---
@@ -140,6 +141,17 @@ class VideoProject(BaseModel):
     @property
     def reference_profile_path(self) -> Path:
         return self.reference_dir / "reference_profile.json"
+
+    @property
+    def reference_lore_profile_path(self) -> Path:
+        # Character KNOWLEDGE mined from the reference transcript (separate from the
+        # music profile above). Cached so lore is only extracted once per run.
+        return self.reference_dir / "reference_lore_profile.json"
+
+    @property
+    def creative_direction_path(self) -> Path:
+        # The original-song brief produced before lyrics are written.
+        return self.run_dir / "creative_direction.json"
 
     # --- Persistence ---
     def save(self) -> None:

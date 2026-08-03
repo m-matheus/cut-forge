@@ -65,12 +65,9 @@ def _execute(step_id: str, project: VideoProject, params: dict, log: LogFn):
         genre = params.get("genre")
         if not genre:
             raise ValueError("Missing 'genre' — pick a genre direction first.")
-        blend = params.get("content_blend") or project.content_blend or "rhythm"
-        if blend != project.content_blend:
-            project.content_blend = blend
-            project.save()
         pkg = song_service.generate_package(
-            project, genre, is_vs=params.get("is_vs", False), content_blend=blend)
+            project, genre, is_vs=params.get("is_vs", False),
+            refresh=params.get("refresh", False), on_log=log)
         log(f"Song: {pkg.title}")
         return {"title": pkg.title, "style": pkg.style}
 
@@ -137,6 +134,10 @@ def run_step(run_id: str, step_id: str, params: dict | None = None, *,
     _mark(run_id, step_id, running=True, error=False)
     log(f"[{step_id}] iniciando…")
     try:
+        # A forced re-run should regenerate cached sub-artifacts (creative direction,
+        # and — when explicitly asked — the mined lore) rather than reuse stale ones.
+        if force and "refresh" not in params:
+            params = {**params, "refresh": True}
         result = _execute(step_id, project, params, log)
         log(f"[{step_id}] concluído.")
         return {"status": "done", "result": result}

@@ -1,21 +1,32 @@
-"""Song generation service — suggests genre directions and generates the full Suno package.
+"""Song generation service — original composition from character lore + reference DNA.
 
 The system prompts are tuned to how Suno AI (v4.5/v5) actually reads its two fields:
 - STYLE = the sonic world only (audio descriptors), never visual/video terms.
 - LYRICS = words + bracketed structure/delivery tags that Suno obeys.
 
-When a reference track is present it drives the SONIC WORLD (genre, BPM, instruments,
-energy). The CHARACTER drives the LYRICAL IDENTITY (attitude, delivery, what is said).
-These two axes are intentionally kept separate so the song sounds like the character
-rapping over the reference's lane — not a generic orchestral-trap template.
+CORE PRINCIPLE — the reference is split into two independent signals:
+- reference MUSIC profile (BPM/flow/onset — the SONIC DNA) → drives the style only.
+- reference LORE profile (facts/abilities/easter eggs mined from the transcript) →
+  feeds the writer as KNOWLEDGE about the character.
+
+The reference's lyrical EXPRESSION is never reused. Every song is written from scratch
+as an ORIGINAL composition: new concept, new hook, new metaphors, new rhymes. A
+CreativeDirection brief is planned first so the writer commits to a new angle instead
+of drifting back toward the reference.
 """
 from __future__ import annotations
 
 import json
 
 from cutforge.integrations import anthropic_client
+from cutforge.models.lore import ReferenceLoreProfile
 from cutforge.models.project import VideoProject
-from cutforge.models.song import GenreDirection, GenreSuggestions, SongPackage
+from cutforge.models.song import (
+    CreativeDirection,
+    GenreDirection,
+    GenreSuggestions,
+    SongPackage,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -98,66 +109,124 @@ anthemic, sing-along hook.
 """
 
 # ---------------------------------------------------------------------------
-# Reference-based addenda
+# Reference-based addenda — SONIC DNA only. The reference's lyrical content is
+# handled entirely through the mined lore profile, never through borrowing.
 # ---------------------------------------------------------------------------
 
-_REFERENCE_HARD_FLOOR = """\
-HARD FLOOR — never violate:
-- NEVER reproduce any line, hook, or distinctive phrase from the reference transcript
-  verbatim, and never merely swap a word or two — that is still copying.
-- NEVER lift the reference's rhyme scheme, metaphor, or hook phrasing as-is — rewrite
-  completely so it reads as a new composition.
-- The transcript is auto-transcribed and may contain mis-heard words.
-Match the reference's RHYTHM:
+_REFERENCE_SONIC_RULES = """\
+REFERENCE = SONIC DNA ONLY
+A reference track is provided. It contributes EXACTLY ONE thing to this song: the sonic
+world — genre/subgenre, BPM, energy, beat character, instrument palette, vocal delivery
+and flow density. Nothing else.
 - Target roughly the given BPM; put ONE number in the style string.
-- Flow: line length and syllables-per-bar. Faster / denser reference → shorter,
-  denser lines; slower → more spacious lines.
-
-LORE MINING (always do this, regardless of content_blend level):
-The reference transcript was written about the same character — it is a goldmine of
-character-specific lore. Read it carefully and extract:
-  - Power names, techniques, abilities mentioned
-  - Iconic story moments or turning points referenced
-  - Personality traits expressed through the lyrics
-  - Thematic threads (sacrifice, loneliness, burning will, etc.)
-  - Any numbers, titles, or symbolic imagery tied to the character
-Then USE these lore facts as raw material for the new song's imagery and references.
-The facts belong to the CHARACTER, not to the reference composer — rewrite them in
-completely fresh language. This is the primary way the reference enriches the lyrics.
+- Flow: match line length and syllables-per-bar to the reference. Faster/denser
+  reference → shorter, denser lines; slower → more spacious lines.
+- Do NOT add orchestral strings, choir or cinematic elements unless the reference
+  itself has them. Trap stays trap; drill stays drill; boom-bap stays boom-bap.
+- The reference's WORDS, themes, hooks and metaphors are OFF-LIMITS for the style. Any
+  character knowledge from the reference reaches you only through the LORE section
+  below — never by reading the reference's lyrics.
 """
 
-_REFERENCE_CONTENT_RULES = {
-    "rhythm": """\
-CONTENT: Use the reference ONLY as a rhythm/energy signal. Do NOT borrow its themes,
-imagery, message, or hook structure — write the character piece entirely from scratch.
-The transcript is vibe-only; treat its words as off-limits.""",
-    "light": """\
-CONTENT (light borrow): Echo 1–2 of the reference's core themes and its overall tone,
-expressed in completely fresh words. Do NOT copy its specific images or metaphors.""",
-    "moderate": """\
-CONTENT (moderate borrow): Reuse the reference's core themes, its semantic field of
-imagery/metaphors, and its hook shape — all rewritten around the character with fresh
-wording. No verbatim phrases.""",
-    "strong": """\
-CONTENT (strong borrow): Take the reference's themes, imagery, message and hook
-structure, follow its section arc, and lift its most striking phrases as inspiration —
-but heavily rewrite each one (swap vocabulary, referents, angle). "Unmistakably
-inspired by, never a copy." The hard floor still holds.""",
-}
+_ORIGINALITY_RULES = """\
+ORIGINALITY — NON-NEGOTIABLE
+You are writing a COMPLETELY ORIGINAL song. It is not a translation, adaptation,
+cover or rewrite of the reference. If a reference exists, you never saw its lyrics —
+you only received its sonic DNA and a list of extracted character facts.
+
+DO NOT:
+- translate the reference;
+- paraphrase the reference;
+- mirror the reference line-by-line or follow its lyrical sequence;
+- reproduce its distinctive phrases, punchlines or hook;
+- reuse its metaphors or imagery;
+- intentionally reproduce its rhyme scheme;
+- preserve its lyrical structure.
+
+DO:
+- use the extracted lore purely as factual/creative source material;
+- invent a NEW narrative angle, hook, metaphors, imagery and rhyme choices;
+- follow the CREATIVE DIRECTION brief below;
+- turn specific lore/easter eggs into fresh lines, metaphors and punchlines of your own.
+
+The test: the final song must read as a brand-new composition that merely happens to be
+about the same character in a similar sonic lane — never as a version of the reference.
+"""
 
 
-def _reference_addendum(level: str) -> str:
-    rules = _REFERENCE_CONTENT_RULES.get(level, _REFERENCE_CONTENT_RULES["rhythm"])
-    return (
-        "\n\nREFERENCE INSPIRATION\n"
-        "You have a reference rap the user admires. Use it to set the SONIC WORLD of "
-        "the new song — genre, tempo, beat energy, vocal delivery style. The CHARACTER "
-        "shapes only the LYRICAL IDENTITY: what the song says, the attitude, the "
-        "imagery, the flow personality. Do NOT impose orchestral/strings/choir unless "
-        "the reference actually has those sounds. If the reference is a trap/drill beat, "
-        "keep it trap/drill. If it is boom-bap, keep it boom-bap.\n"
-        f"{_REFERENCE_HARD_FLOOR}\n{rules}"
-    )
+# ---------------------------------------------------------------------------
+# Lore + creative-direction prompt formatting
+# ---------------------------------------------------------------------------
+
+def _format_lore_for_prompt(lore: ReferenceLoreProfile) -> str:
+    """Render a mined lore profile as a compact, writer-facing knowledge block."""
+    parts: list[str] = [
+        "CHARACTER LORE (mined from the reference — this is KNOWLEDGE, not lyrics to "
+        "reuse). Use these as raw material for NEW lines, metaphors and punchlines. "
+        "Never quote or paraphrase how the reference expressed them.",
+    ]
+    if lore.character:
+        parts.append(f"- Character: {lore.character}")
+    if lore.facts:
+        parts.append("- Facts:")
+        parts += [f"    • [{f.category}/{f.confidence}] {f.fact}" for f in lore.facts]
+    if lore.abilities:
+        parts.append("- Abilities / techniques:")
+        parts += [
+            f"    • {a.name}: {a.description}".rstrip(": ").rstrip() for a in lore.abilities
+        ]
+    if lore.events:
+        parts.append("- Story events / turning points:")
+        parts += [f"    • [{e.importance}] {e.event}" for e in lore.events]
+    if lore.relationships:
+        parts.append("- Relationships:")
+        parts += [
+            f"    • {' & '.join(r.characters)}: {r.relationship}".strip()
+            for r in lore.relationships
+        ]
+    if lore.easter_eggs:
+        parts.append("- Easter eggs (specific anime/manga references — gold for punchlines):")
+        for egg in lore.easter_eggs:
+            meaning = f" → {egg.interpreted_meaning}" if egg.interpreted_meaning else ""
+            related = f" (related: {egg.related_lore})" if egg.related_lore else ""
+            parts.append(f"    • {egg.reference}{meaning}{related}")
+    if lore.themes:
+        parts.append(f"- Themes: {', '.join(lore.themes)}")
+    if lore.personality_traits:
+        parts.append(f"- Personality traits: {', '.join(lore.personality_traits)}")
+    if lore.author_interpretations:
+        parts.append(
+            "- The reference composer's OWN takes (context only — do NOT reuse these as "
+            "your own angle): " + "; ".join(lore.author_interpretations)
+        )
+    if lore.uncertain_items:
+        parts.append(
+            "- Uncertain / possibly mis-transcribed (verify against what you know before "
+            "relying on these): " + "; ".join(lore.uncertain_items)
+        )
+    return "\n".join(parts)
+
+
+def _format_direction_for_prompt(direction: CreativeDirection) -> str:
+    """Render the creative-direction brief as a writer-facing block."""
+    parts = ["CREATIVE DIRECTION (the NEW song to write — follow this brief):"]
+    if direction.core_theme:
+        parts.append(f"- Core theme: {direction.core_theme}")
+    if direction.narrative_angle:
+        parts.append(f"- Narrative angle: {direction.narrative_angle}")
+    if direction.emotional_arc:
+        parts.append(f"- Emotional arc: {direction.emotional_arc}")
+    if direction.hook_concept:
+        parts.append(f"- Hook concept: {direction.hook_concept}")
+    if direction.key_lore_points:
+        parts.append("- Key lore points to weave in: " + "; ".join(direction.key_lore_points))
+    if direction.original_metaphor_direction:
+        parts.append(f"- Original metaphor direction: {direction.original_metaphor_direction}")
+    if direction.delivery_personality:
+        parts.append(f"- Delivery personality: {direction.delivery_personality}")
+    if direction.things_to_avoid:
+        parts.append("- Things to avoid: " + "; ".join(direction.things_to_avoid))
+    return "\n".join(parts)
 
 
 # ---------------------------------------------------------------------------
@@ -197,25 +266,66 @@ SUGGEST_SYSTEM_PROMPT_WITH_REF = SUGGEST_SYSTEM_PROMPT_BASE + """
 GENRE FOLLOWS THE REFERENCE — when a reference is provided the 3 directions must be
 anchored to the reference's lane and BPM. They are VARIATIONS within that lane (e.g.
 harder vs. more melodic, sparser vs. more orchestral), not three unrelated genres.
-Use the reference's transcript to infer: subgenre, energy, beat character, vocal style.
-Do NOT add orchestral strings / choir unless the reference itself has them.
-Every direction must still genuinely fit the character.
+Infer subgenre, energy, beat character and vocal style from the reference's SONIC DNA
+(BPM / onset density). Do NOT add orchestral strings / choir unless the reference itself
+has them. Every direction must still genuinely fit the character.
+"""
+
+# Creative-direction planner — the brief-writer that answers "what is the NEW song?".
+CREATIVE_DIRECTION_SYSTEM_PROMPT = """\
+You are a creative director for an anime-rap channel (BASARA / M4RKIM / Rustage lane).
+Your job is to design the brief for a COMPLETELY ORIGINAL song about a specific anime
+character (or matchup), BEFORE any lyrics are written.
+
+You answer ONE question: "What is the NEW song we are trying to make?"
+You NEVER answer "How do we rewrite the reference?".
+
+Inputs you may receive:
+- the character / anime and the user's topic;
+- a reference MUSIC profile (BPM/energy) — sonic direction only;
+- mined CHARACTER LORE (facts, abilities, events, easter eggs) — knowledge to draw from.
+
+Design an original direction: pick a fresh core theme and narrative angle, an emotional
+arc, an original hook concept, the specific lore points worth weaving in, a direction for
+NEW metaphors (not the reference's), and the delivery personality. In "things_to_avoid",
+explicitly include reusing the reference's expression (its hooks, metaphors, phrasing,
+structure) and any clichés that would make the song generic.
+
+Prefer specific, character-grounded ideas over generic hype. If strong easter eggs /
+obscure lore exist, prioritise them — they make the song feel authentic and specific.
+
+OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
+{
+  "core_theme": "the central idea of the NEW song, in one line",
+  "narrative_angle": "the fresh POV/approach (e.g. 'first-person vow at his lowest moment')",
+  "emotional_arc": "how the feeling evolves across the song",
+  "hook_concept": "an ORIGINAL hook idea — the concept, not finished lyrics",
+  "key_lore_points": ["specific facts/abilities/easter eggs to weave in", "..."],
+  "original_metaphor_direction": "a fresh metaphor world to invent lines from",
+  "delivery_personality": "the rap persona/attitude and cadence feel",
+  "things_to_avoid": ["reference's hook/metaphors/phrasing", "generic clichés", "..."]
+}
+Return ONLY the JSON object.
 """
 
 GENERATE_SYSTEM_PROMPT_BASE = f"""\
 You are an expert songwriter and music producer for an anime-rap channel in the lane
-of BASARA, M4RKIM, ANIRAP, Rustage and 7 Minutoz. You write an original song about a
-specific anime character (or matchup) that will be generated on Suno AI.
+of BASARA, M4RKIM, ANIRAP, Rustage and 7 Minutoz. You write a COMPLETELY ORIGINAL song
+about a specific anime character (or matchup) that will be generated on Suno AI.
+
+You are writing a completely original song. When a reference exists, it gives you ONLY
+the sonic world (genre/BPM/energy) and a list of extracted character facts — you never
+saw its lyrics and you never reproduce its expression.
 
 You know exactly how Suno reads its Style and Lyrics fields and you exploit that to
 get a clean, on-genre track — not generic mush.
 
 TWO AXES — keep them separate:
-  SONIC WORLD  → driven by the REFERENCE (genre, BPM, instruments, energy, beat feel)
-  LYRICAL IDENTITY → driven by the CHARACTER (attitude, powers, arc, delivery persona)
+  SONIC WORLD  → genre, BPM, instruments, energy, beat feel (from the reference if any)
+  LYRICAL IDENTITY → the ORIGINAL composition: character attitude, powers, arc, delivery,
+                     following the CREATIVE DIRECTION brief and the mined lore.
 
-The goal is to imagine that CHARACTER rapping in the REFERENCE'S lane.
-Does the song sound like this character performing in this style? That is the test.
+{_ORIGINALITY_RULES}
 
 {_SUNO_STYLE_RULES}
 
@@ -241,9 +351,9 @@ For a vs / matchup: alternate perspectives, make the chorus the clash.
 
 TONE & CONTENT
 - The song is FROM or ABOUT the character — capture their personality, powers and arc
-  through vivid, specific imagery. Not a plot summary — a hype anthem / character piece.
-- Reference their actual abilities, iconic moments and traits through metaphor and
-  attitude, not exposition.
+  through vivid, specific, ORIGINAL imagery. Not a plot summary — a hype anthem.
+- Turn the mined lore, abilities and easter eggs into fresh metaphors and punchlines of
+  your own invention — never a restatement of how the reference phrased them.
 - Do NOT use trademarked catchphrases verbatim; evoke them instead.
 - Keep it hype and quotable — the hook should be something viewers scream in the comments.
 
@@ -264,6 +374,10 @@ OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
 
 GENERATE_SYSTEM_PROMPT_NO_REF = GENERATE_SYSTEM_PROMPT_BASE + f"""
 {_ARCHETYPE_RANGE_NO_REF}
+"""
+
+GENERATE_SYSTEM_PROMPT_WITH_REF = GENERATE_SYSTEM_PROMPT_BASE + f"""
+{_REFERENCE_SONIC_RULES}
 """
 
 SUGGEST_MOOD_SYSTEM_PROMPT = """\
@@ -294,12 +408,12 @@ def suggest_mood(character: str, anime: str = "") -> str:
     return text.strip().strip('"').splitlines()[0]
 
 
-def suggest_genres(project: VideoProject, *, content_blend: str | None = None) -> GenreSuggestions:
+def suggest_genres(project: VideoProject, **_ignored) -> GenreSuggestions:
     """Return 3 genre directions for the project's character/topic.
 
-    When a reference rap is present the genre always follows the reference's lane.
-    ``content_blend`` is accepted for signature compatibility but only governs lyrical
-    content at generation time — it no longer gates genre anchoring.
+    When a reference rap is present the genre always follows the reference's SONIC lane.
+    Extra keyword args (e.g. the deprecated ``content_blend``) are accepted and ignored
+    for signature compatibility — they no longer influence anything.
     """
     from cutforge.services import reference_service
 
@@ -311,12 +425,10 @@ def suggest_genres(project: VideoProject, *, content_blend: str | None = None) -
     if profile:
         system = SUGGEST_SYSTEM_PROMPT_WITH_REF
         lines += [
-            "REFERENCE (derive the genre/lane from this — stay in its lane):",
+            "REFERENCE SONIC DNA (derive the genre/lane from this — sound only):",
             f"- BPM: {profile.get('bpm')} — use this one number in every style string",
             f"- Onset density: {profile.get('onset_rate_per_sec')} onsets/s",
             f"- Title: {profile.get('source_title')}",
-            f"- Transcript (infer subgenre, energy, beat character — do NOT copy words): "
-            f"{profile.get('transcript', '')[:1200]}",
             "",
             "Propose 3 directions. All 3 must stay in the reference's lane and use its BPM. "
             "Vary within the lane (e.g. harder vs. more melodic). Every direction must also "
@@ -336,18 +448,105 @@ def suggest_genres(project: VideoProject, *, content_blend: str | None = None) -
     return GenreSuggestions(character_read=data.get("character_read", ""), directions=directions)
 
 
+def plan_creative_direction(
+    project: VideoProject,
+    genre: str,
+    *,
+    music_profile: dict | None = None,
+    lore_profile: ReferenceLoreProfile | None = None,
+    is_vs: bool = False,
+    refresh: bool = False,
+) -> CreativeDirection:
+    """Plan the original-song brief (cached to ``creative_direction_path``).
+
+    Answers "what is the NEW song?" from the character, the chosen genre and — when a
+    reference exists — its music profile and mined lore. Persisted so a re-run of the
+    lyrics step does not re-plan unless ``refresh=True``.
+    """
+    if project.creative_direction_path.exists() and not refresh:
+        data = json.loads(project.creative_direction_path.read_text(encoding="utf-8"))
+        return CreativeDirection(**data)
+
+    topic = project.topic or project.character
+    lines = [
+        f"Character / matchup: {topic}",
+        f"Chosen genre / sonic direction: {genre}",
+    ]
+    if project.character:
+        lines.append(f"Character name(s): {project.character}")
+    if project.anime:
+        lines.append(f"Anime: {project.anime}")
+    if project.mood:
+        lines.append(f"Desired mood/vibe: {project.mood}")
+    if is_vs:
+        lines.append("This is a VS / matchup song — the direction should frame the clash.")
+
+    if music_profile:
+        lines += [
+            "",
+            "REFERENCE SONIC DNA (energy/tempo context — sound only, no lyrics):",
+            f"- BPM: {music_profile.get('bpm')}",
+            f"- Onset density: {music_profile.get('onset_rate_per_sec')} onsets/s",
+        ]
+    if lore_profile and not lore_profile.is_empty():
+        lines += ["", _format_lore_for_prompt(lore_profile)]
+
+    lines += [
+        "",
+        "Design the brief for a NEW original song. Return only valid JSON.",
+    ]
+    user_prompt = "\n".join(lines)
+
+    data = anthropic_client.complete_json(CREATIVE_DIRECTION_SYSTEM_PROMPT, user_prompt)
+    direction = CreativeDirection(**data)
+
+    project.run_dir.mkdir(parents=True, exist_ok=True)
+    project.creative_direction_path.write_text(
+        direction.model_dump_json(indent=2), encoding="utf-8"
+    )
+    return direction
+
+
 def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
                      reference_profile: dict | None = None,
-                     content_blend: str = "rhythm") -> SongPackage:
+                     refresh: bool = False,
+                     refresh_lore: bool = False,
+                     on_log=None,
+                     **_ignored) -> SongPackage:
     """Generate the full Suno package and write lyrics.txt + suno_prompt.json.
 
-    The reference (when present) drives the SONIC WORLD; the character drives the
-    LYRICAL IDENTITY. ``content_blend`` controls how much of the reference's lyrical
-    content may be borrowed: rhythm (none) → light → moderate → strong.
+    Orchestrates the original-composition flow:
+      reference music profile + mined lore  →  creative direction  →  original writer.
+
+    The reference (when present) drives ONLY the sonic world; its lyrical expression is
+    never reused. ``refresh`` re-plans the creative direction (used on a forced
+    regenerate for a new angle); ``refresh_lore`` additionally re-mines the reference
+    lore. Extra keyword args (e.g. the deprecated ``content_blend``) are accepted and
+    ignored for signature compatibility.
     """
+    from cutforge.services import lore_service, reference_service
+
+    log = on_log or (lambda _m: None)
+
     if reference_profile is None:
-        from cutforge.services import reference_service
         reference_profile = reference_service.load_reference_profile(project)
+
+    # Mine the reference transcript into character KNOWLEDGE (cached). This is where the
+    # reference's lyrics contribute — as facts, never as expression. Lore is objective
+    # and stable, so it is NOT re-mined on a plain regenerate (avoids a wasted LLM call);
+    # pass ``refresh_lore=True`` explicitly to force re-mining.
+    lore_profile = None
+    if reference_profile:
+        lore_profile = lore_service.mine_reference_lore(
+            project, refresh=refresh_lore, on_log=log)
+
+    # Plan the original-song brief before writing a single line (cached; a forced
+    # regenerate refreshes it so the new lyrics get a genuinely new angle).
+    direction = plan_creative_direction(
+        project, genre,
+        music_profile=reference_profile, lore_profile=lore_profile,
+        is_vs=is_vs, refresh=refresh,
+    )
 
     topic = project.topic or project.character
     lines = [
@@ -363,38 +562,30 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
             "This is a VS / matchup song — alternate perspectives and make the chorus the clash."
         )
 
+    lines += ["", _format_direction_for_prompt(direction)]
+
     if reference_profile:
-        system_prompt = GENERATE_SYSTEM_PROMPT_BASE + _reference_addendum(content_blend)
+        system_prompt = GENERATE_SYSTEM_PROMPT_WITH_REF
         flow = reference_profile.get("flow", {})
-        rhythm_only = content_blend == "rhythm"
-        header = (
-            "REFERENCE (sonic world — derive style from this; do NOT copy any words):"
-            if rhythm_only else
-            f"REFERENCE (sonic world + content inspiration, blend='{content_blend}' — never copy verbatim):"
-        )
-        transcript_note = (
-            "- Transcript (derive genre/energy/beat feel; words are off-limits):"
-            if rhythm_only else
-            "- Transcript (content inspiration — rewrite thoroughly, never copy):"
-        )
         lines += [
             "",
-            header,
+            "REFERENCE SONIC DNA (build the STYLE from this — sound only, no lyrics):",
             f"- BPM: {reference_profile.get('bpm')} (put this ONE number in the style string)",
             f"- Time signature: {reference_profile.get('time_signature')}/4",
             f"- Onset density: {reference_profile.get('onset_rate_per_sec')} onsets/s",
             f"- Flow: {flow.get('words_per_sec')} words/s, ~{flow.get('syllables_per_beat')} syllables/beat",
-            transcript_note,
-            reference_profile.get("transcript", ""),
             "",
-            "Build the style string from what you HEAR in this reference's lane. "
-            "Do NOT add orchestral strings, choir, or cinematic elements unless they are "
-            "present in the reference. Stay in the reference's genre lane.",
+            "Build the style string from the reference's sonic lane. Do NOT add orchestral "
+            "strings, choir or cinematic elements unless present in the reference. Stay in "
+            "the reference's genre lane. The reference's WORDS are off-limits — write the "
+            "lyrics entirely from the creative direction and lore above.",
         ]
+        if lore_profile and not lore_profile.is_empty():
+            lines += ["", _format_lore_for_prompt(lore_profile)]
     else:
         system_prompt = GENERATE_SYSTEM_PROMPT_NO_REF
 
-    lines += ["", "Write the complete Suno package. Return only valid JSON."]
+    lines += ["", "Write the complete ORIGINAL Suno package. Return only valid JSON."]
     user_prompt = "\n".join(lines)
 
     data = anthropic_client.complete_json(system_prompt, user_prompt)

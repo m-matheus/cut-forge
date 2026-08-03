@@ -17,6 +17,25 @@ class GenreSuggestions(BaseModel):
     directions: list[GenreDirection] = Field(default_factory=list)
 
 
+class CreativeDirection(BaseModel):
+    """The brief for a NEW, original song — produced before any lyrics are written.
+
+    Answers "what is the new song we are trying to make?", never "how do we rewrite the
+    reference?". Fed the character, the anime, the (optional) reference music + lore
+    profiles and the user's topic; its job is to commit to an original angle so the
+    writer never falls back to paraphrasing the reference.
+    """
+
+    core_theme: str = ""
+    narrative_angle: str = ""
+    emotional_arc: str = ""
+    hook_concept: str = ""
+    key_lore_points: list[str] = Field(default_factory=list)
+    original_metaphor_direction: str = ""
+    delivery_personality: str = ""
+    things_to_avoid: list[str] = Field(default_factory=list)
+
+
 class SongPackage(BaseModel):
     """A complete, Suno-ready song package. Written to suno_prompt.json + lyrics.txt."""
 

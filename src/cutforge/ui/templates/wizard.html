@@ -10,7 +10,7 @@
 </nav>
 
 <article
-  x-data='wizard("{{ project.run_id }}", {{ steps | tojson }}, {{ {"footageUrl": project.footage_url, "referenceUrl": project.reference_url, "contentBlend": project.content_blend} | tojson }})'
+  x-data='wizard("{{ project.run_id }}", {{ steps | tojson }}, {{ {"footageUrl": project.footage_url, "referenceUrl": project.reference_url} | tojson }})'
   x-init="init()">
 
   <hgroup>
@@ -71,25 +71,7 @@
                 <!-- Generate tab -->
                 <div x-show="lyricsTab==='generate'">
                   <template x-if="hasReference">
-                    <p class="ok"><small>✓ Usando o rap de referência: gênero e BPM seguem a referência; o flow também.</small></p>
-                  </template>
-                  <template x-if="hasReference">
-                    <div class="blend-picker">
-                      <label>
-                        <small>Quanto do conteúdo usar da referência</small>
-                        <select x-model="contentBlend">
-                          <option value="rhythm">Só ritmo (não copia conteúdo)</option>
-                          <option value="light">Leve — ecos sutis de tema/tom</option>
-                          <option value="moderate">Moderada — tema + imagens + estilo do gancho</option>
-                          <option value="strong">Forte — tema, imagens e frases reformuladas</option>
-                        </select>
-                      </label>
-                      <small class="muted" x-show="contentBlend==='rhythm'">Apenas o BPM/flow influenciam. Nenhum tema ou imagem da referência é reaproveitado.</small>
-                      <small class="muted" x-show="contentBlend==='light'">Ecoa 1-2 temas centrais e o tom, com palavras totalmente novas.</small>
-                      <small class="muted" x-show="contentBlend==='moderate'">Reaproveita temas, o campo de imagens/metáforas e o formato do gancho — reescritos para o personagem.</small>
-                      <small class="muted" x-show="contentBlend==='strong'">Empresta tema, imagens, estrutura e frases marcantes fortemente reformuladas. Nunca copia texto literal.</small>
-                      <small class="muted">O gênero sempre segue a referência; isto controla só o quanto da LETRA é inspirada nela.</small>
-                    </div>
+                    <p class="ok"><small>✓ Usando o rap de referência: o gênero, o BPM e o flow seguem a referência; a letra é uma composição 100% original (o lore do personagem é extraído da referência, mas a expressão é nova).</small></p>
                   </template>
                   <button class="secondary outline" @click="suggestGenres()"
                           :aria-busy="busy.suggest" :disabled="busy.suggest">
@@ -278,7 +260,6 @@ function wizard(runId, initialSteps, saved) {
     chosenGenre: '',
     footageUrl: saved.footageUrl || '',
     referenceUrl: saved.referenceUrl || '',
-    contentBlend: saved.contentBlend || 'moderate',
     genreBadge: '',
     trackUploaded: false,
     lyricsTab: 'generate',
@@ -362,7 +343,7 @@ function wizard(runId, initialSteps, saved) {
         const r = await fetch(`/api/runs/${this.runId}/suggest-genres`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ content_blend: this.contentBlend }),
+          body: JSON.stringify({}),
         });
         const j = await r.json();
         this.genres = j.directions || [];
@@ -393,7 +374,7 @@ function wizard(runId, initialSteps, saved) {
         : 'Gerar letra chama a API Anthropic.';
       if (!confirm(msg + '\n\nContinuar?')) return;
       this.lyricsOutput = {};
-      this.runStep('lyrics', { genre: this.chosenGenre, content_blend: this.contentBlend }, regenerating);
+      this.runStep('lyrics', { genre: this.chosenGenre }, regenerating);
     },
 
     async runStep(stepId, params, force) {

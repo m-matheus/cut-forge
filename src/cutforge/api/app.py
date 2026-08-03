@@ -104,8 +104,7 @@ def create_app() -> FastAPI:
     @app.post("/api/runs/{run_id}/suggest-genres")
     def suggest_genres(run_id: str, payload: dict | None = None):
         project = VideoProject.load(run_id)
-        blend = (payload or {}).get("content_blend")
-        suggestions = song_service.suggest_genres(project, content_blend=blend)
+        suggestions = song_service.suggest_genres(project)
         return suggestions.model_dump()
 
     # ---- Mood suggestion (stateless — used on the create screen) ----
@@ -196,6 +195,13 @@ def create_app() -> FastAPI:
         if not project.reference_profile_path.exists():
             return JSONResponse({"error": "not found"}, status_code=404)
         return json.loads(project.reference_profile_path.read_text(encoding="utf-8"))
+
+    @app.get("/api/runs/{run_id}/output/reference-lore")
+    def output_reference_lore(run_id: str):
+        project = VideoProject.load(run_id)
+        if not project.reference_lore_profile_path.exists():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return json.loads(project.reference_lore_profile_path.read_text(encoding="utf-8"))
 
     @app.get("/api/runs/{run_id}/output/thumbnail")
     def output_thumbnail(run_id: str):
