@@ -1,0 +1,114 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ENKAI intro background 01 — "Eclipse" -->
+<!-- 1920x1080 · fully vector · edit colors via the <defs> below · NO text -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <!-- ==== BRAND PALETTE (edit here) ==== -->
+    <!-- navy bg #071026 / #0b1836 · gold #ffb638 / #ffe08a · red #c31226 · cyan #00e5ff -->
+    <radialGradient id="bgFill" cx="50%" cy="46%" r="75%">
+      <stop offset="0%"  stop-color="#0d1c3f"/>
+      <stop offset="55%" stop-color="#0a1530"/>
+      <stop offset="100%" stop-color="#050b1c"/>
+    </radialGradient>
+
+    <radialGradient id="eclipseGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"  stop-color="#000000" stop-opacity="0"/>
+      <stop offset="78%" stop-color="#000000" stop-opacity="0"/>
+      <stop offset="88%" stop-color="#ffcf6b" stop-opacity="0.95"/>
+      <stop offset="93%" stop-color="#ffb638" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ffb638" stop-opacity="0"/>
+    </radialGradient>
+
+    <radialGradient id="coreShadow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"  stop-color="#05070f"/>
+      <stop offset="100%" stop-color="#0a1226"/>
+    </radialGradient>
+
+    <linearGradient id="redBrush" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#e01e34"/>
+      <stop offset="100%" stop-color="#8f0d1c"/>
+    </linearGradient>
+
+    <radialGradient id="topSpot" cx="50%" cy="0%" r="60%">
+      <stop offset="0%"  stop-color="#ffcf6b" stop-opacity="0.16"/>
+      <stop offset="100%" stop-color="#ffcf6b" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="soft" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+    <filter id="softer" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="34"/>
+    </filter>
+
+    <!-- reusable seigaiha (wave-scale) tile -->
+    <g id="wave">
+      <path d="M0 40 A40 40 0 0 1 80 40" fill="none" stroke="#ffb638" stroke-width="2" stroke-opacity="0.5"/>
+      <path d="M0 40 A26 26 0 0 1 52 40" fill="none" stroke="#ffb638" stroke-width="1.6" stroke-opacity="0.32" transform="translate(14 0)"/>
+      <path d="M0 40 A12 12 0 0 1 24 40" fill="none" stroke="#ffb638" stroke-width="1.4" stroke-opacity="0.22" transform="translate(28 0)"/>
+    </g>
+  </defs>
+
+  <!-- base -->
+  <rect width="1920" height="1080" fill="url(#bgFill)"/>
+  <rect width="1920" height="1080" fill="url(#topSpot)"/>
+
+  <!-- concentric guide rings (gold, faint) -->
+  <g stroke="#ffb638" fill="none" stroke-opacity="0.10">
+    <circle cx="960" cy="500" r="250"/>
+    <circle cx="960" cy="500" r="360"/>
+    <circle cx="960" cy="500" r="470"/>
+    <circle cx="960" cy="500" r="600"/>
+    <circle cx="960" cy="500" r="740"/>
+  </g>
+
+  <!-- seigaiha wave band across the whole frame (subtle, tiled) -->
+  <g opacity="0.5">
+    <use href="#wave" x="0"    y="900"/>
+    <use href="#wave" x="80"   y="900"/><use href="#wave" x="160" y="900"/><use href="#wave" x="240" y="900"/>
+    <use href="#wave" x="320"  y="900"/><use href="#wave" x="400" y="900"/><use href="#wave" x="480" y="900"/>
+    <use href="#wave" x="560"  y="900"/><use href="#wave" x="640" y="900"/><use href="#wave" x="720" y="900"/>
+    <use href="#wave" x="800"  y="900"/><use href="#wave" x="880" y="900"/><use href="#wave" x="960" y="900"/>
+    <use href="#wave" x="1040" y="900"/><use href="#wave" x="1120" y="900"/><use href="#wave" x="1200" y="900"/>
+    <use href="#wave" x="1280" y="900"/><use href="#wave" x="1360" y="900"/><use href="#wave" x="1440" y="900"/>
+    <use href="#wave" x="1520" y="900"/><use href="#wave" x="1600" y="900"/><use href="#wave" x="1680" y="900"/>
+    <use href="#wave" x="1760" y="900"/><use href="#wave" x="1840" y="900"/>
+  </g>
+
+  <!-- eclipse: dark core + luminous rim -->
+  <circle cx="960" cy="500" r="300" fill="url(#coreShadow)"/>
+  <circle cx="960" cy="500" r="330" fill="url(#eclipseGlow)" filter="url(#soft)"/>
+  <circle cx="960" cy="500" r="303" fill="none" stroke="#ffe08a" stroke-width="3" stroke-opacity="0.9"/>
+
+  <!-- red ink brush arcs on the sides (frame the composition) -->
+  <g filter="url(#softer)">
+    <path d="M-40 120 C 260 300 260 780 -40 960 L -220 960 L -220 120 Z" fill="url(#redBrush)" opacity="0.85"/>
+    <path d="M1960 120 C 1660 300 1660 780 1960 960 L 2140 960 L 2140 120 Z" fill="url(#redBrush)" opacity="0.85"/>
+  </g>
+
+  <!-- cyan accent sparks (brand primary) -->
+  <g fill="#00e5ff">
+    <circle cx="620"  cy="300" r="3" opacity="0.8"/>
+    <circle cx="1330" cy="360" r="2.5" opacity="0.7"/>
+    <circle cx="760"  cy="720" r="2" opacity="0.6"/>
+    <circle cx="1180" cy="690" r="3" opacity="0.75"/>
+  </g>
+
+  <!-- gold dust particles -->
+  <g fill="#ffcf6b">
+    <circle cx="500"  cy="220" r="2" opacity="0.7"/>
+    <circle cx="1440" cy="250" r="1.6" opacity="0.6"/>
+    <circle cx="360"  cy="620" r="1.8" opacity="0.5"/>
+    <circle cx="1560" cy="640" r="2" opacity="0.6"/>
+    <circle cx="900"  cy="180" r="1.5" opacity="0.6"/>
+    <circle cx="1020" cy="860" r="1.6" opacity="0.5"/>
+  </g>
+
+  <!-- vignette -->
+  <rect width="1920" height="1080" fill="url(#eclipseGlow)" opacity="0"/>
+  <radialGradient id="vig" cx="50%" cy="50%" r="70%">
+    <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
+    <stop offset="100%" stop-color="#000000" stop-opacity="0.55"/>
+  </radialGradient>
+  <rect width="1920" height="1080" fill="url(#vig)"/>
+</svg>

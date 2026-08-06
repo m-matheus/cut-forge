@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ENKAI intro background 02 — "Rising Sun / Sunburst" -->
+<!-- 1920x1080 · fully vector · NO text · center kept clean for a logo/title -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#0c1c40"/>
+      <stop offset="60%" stop-color="#0a1430"/>
+      <stop offset="100%" stop-color="#06101f"/>
+    </linearGradient>
+
+    <radialGradient id="sunGlow" cx="50%" cy="58%" r="55%">
+      <stop offset="0%"  stop-color="#ffdf9c" stop-opacity="0.9"/>
+      <stop offset="30%" stop-color="#ffb638" stop-opacity="0.45"/>
+      <stop offset="70%" stop-color="#c31226" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#c31226" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="rayGold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"  stop-color="#ffcf6b" stop-opacity="0.55"/>
+      <stop offset="100%" stop-color="#ffcf6b" stop-opacity="0"/>
+    </linearGradient>
+
+    <filter id="blur2" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="26"/>
+    </filter>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#sky)"/>
+
+  <!-- sunburst rays emanating from lower-center focal point (630) -->
+  <g transform="translate(960 630)" opacity="0.6">
+    <g fill="url(#rayGold)">
+      <!-- 24 triangular rays -->
+      <g id="ray"><polygon points="-70,0 70,0 40,-1400 -40,-1400"/></g>
+      <use href="#ray" transform="rotate(15)"/>
+      <use href="#ray" transform="rotate(30)"/>
+      <use href="#ray" transform="rotate(45)"/>
+      <use href="#ray" transform="rotate(60)"/>
+      <use href="#ray" transform="rotate(75)"/>
+      <use href="#ray" transform="rotate(90)"/>
+      <use href="#ray" transform="rotate(105)"/>
+      <use href="#ray" transform="rotate(120)"/>
+      <use href="#ray" transform="rotate(135)"/>
+      <use href="#ray" transform="rotate(150)"/>
+      <use href="#ray" transform="rotate(165)"/>
+      <use href="#ray" transform="rotate(180)"/>
+      <use href="#ray" transform="rotate(195)"/>
+      <use href="#ray" transform="rotate(210)"/>
+      <use href="#ray" transform="rotate(225)"/>
+      <use href="#ray" transform="rotate(240)"/>
+      <use href="#ray" transform="rotate(255)"/>
+      <use href="#ray" transform="rotate(270)"/>
+      <use href="#ray" transform="rotate(285)"/>
+      <use href="#ray" transform="rotate(300)"/>
+      <use href="#ray" transform="rotate(315)"/>
+      <use href="#ray" transform="rotate(330)"/>
+      <use href="#ray" transform="rotate(345)"/>
+    </g>
+  </g>
+
+  <!-- big soft sun glow -->
+  <circle cx="960" cy="630" r="560" fill="url(#sunGlow)"/>
+
+  <!-- clean dark disc in center so a logo reads over it -->
+  <circle cx="960" cy="560" r="330" fill="#0a1430" opacity="0.55" filter="url(#blur2)"/>
+
+  <!-- distant mountains silhouette (bottom), layered -->
+  <path d="M0 1080 L0 860 L240 720 L470 830 L720 690 L960 800 L1200 700 L1470 820 L1720 720 L1920 850 L1920 1080 Z"
+        fill="#060d1c"/>
+  <path d="M0 1080 L0 940 L300 850 L560 930 L860 840 L1120 930 L1420 850 L1720 940 L1920 900 L1920 1080 Z"
+        fill="#040a15"/>
+
+  <!-- red ink stroke sweeping the top corners -->
+  <g fill="#c31226" opacity="0.7" filter="url(#blur2)">
+    <path d="M0 0 L520 0 C 340 120 180 220 0 250 Z"/>
+    <path d="M1920 0 L1400 0 C 1580 120 1740 220 1920 250 Z"/>
+  </g>
+
+  <!-- floating gold embers -->
+  <g fill="#ffcf6b">
+    <circle cx="520" cy="380" r="2.4" opacity="0.8"/>
+    <circle cx="1380" cy="330" r="2" opacity="0.7"/>
+    <circle cx="700" cy="250" r="1.6" opacity="0.6"/>
+    <circle cx="1250" cy="470" r="2.2" opacity="0.7"/>
+    <circle cx="820" cy="520" r="1.5" opacity="0.5"/>
+    <circle cx="1120" cy="230" r="1.8" opacity="0.6"/>
+  </g>
+
+  <radialGradient id="vig2" cx="50%" cy="45%" r="72%">
+    <stop offset="58%" stop-color="#000000" stop-opacity="0"/>
+    <stop offset="100%" stop-color="#000000" stop-opacity="0.5"/>
+  </radialGradient>
+  <rect width="1920" height="1080" fill="url(#vig2)"/>
+</svg>

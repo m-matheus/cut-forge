@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ENKAI intro background 04 — "Ink & Cyan" (minimal, cyan-forward) -->
+<!-- 1920x1080 · fully vector · NO text · lots of clean space for a title -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <radialGradient id="bg4" cx="50%" cy="42%" r="80%">
+      <stop offset="0%"  stop-color="#0a1836"/>
+      <stop offset="55%" stop-color="#071227"/>
+      <stop offset="100%" stop-color="#03070f"/>
+    </radialGradient>
+
+    <radialGradient id="cyanGlow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%"  stop-color="#00e5ff" stop-opacity="0.5"/>
+      <stop offset="45%" stop-color="#00a8c4" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#00e5ff" stop-opacity="0"/>
+    </radialGradient>
+
+    <linearGradient id="ring4" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%"  stop-color="#00e5ff"/>
+      <stop offset="55%" stop-color="#ffb638"/>
+      <stop offset="100%" stop-color="#c31226"/>
+    </linearGradient>
+
+    <linearGradient id="inkBrush4" x1="0" y1="0" x2="1" y2="0.3">
+      <stop offset="0%"  stop-color="#c31226"/>
+      <stop offset="100%" stop-color="#6e0a15"/>
+    </linearGradient>
+
+    <filter id="blur4" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="30"/>
+    </filter>
+
+    <!-- large seigaiha tile -->
+    <g id="bigwave">
+      <path d="M0 120 A120 120 0 0 1 240 120" fill="none" stroke="#00e5ff" stroke-width="2.4" stroke-opacity="0.30"/>
+      <path d="M0 120 A80 80 0 0 1 160 120" fill="none" stroke="#00e5ff" stroke-width="2" stroke-opacity="0.20" transform="translate(40 0)"/>
+      <path d="M0 120 A40 40 0 0 1 80 120" fill="none" stroke="#00e5ff" stroke-width="1.8" stroke-opacity="0.14" transform="translate(80 0)"/>
+    </g>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#bg4)"/>
+
+  <!-- large seigaiha field, bottom third -->
+  <g opacity="0.8">
+    <use href="#bigwave" x="-120" y="760"/><use href="#bigwave" x="120" y="760"/>
+    <use href="#bigwave" x="360"  y="760"/><use href="#bigwave" x="600" y="760"/>
+    <use href="#bigwave" x="840"  y="760"/><use href="#bigwave" x="1080" y="760"/>
+    <use href="#bigwave" x="1320" y="760"/><use href="#bigwave" x="1560" y="760"/>
+    <use href="#bigwave" x="1800" y="760"/>
+    <use href="#bigwave" x="-240" y="880"/><use href="#bigwave" x="0" y="880"/>
+    <use href="#bigwave" x="240"  y="880"/><use href="#bigwave" x="480" y="880"/>
+    <use href="#bigwave" x="720"  y="880"/><use href="#bigwave" x="960" y="880"/>
+    <use href="#bigwave" x="1200" y="880"/><use href="#bigwave" x="1440" y="880"/>
+    <use href="#bigwave" x="1680" y="880"/><use href="#bigwave" x="1920" y="880"/>
+  </g>
+
+  <!-- central cyan energy bloom -->
+  <circle cx="960" cy="470" r="480" fill="url(#cyanGlow)" filter="url(#blur4)"/>
+
+  <!-- thin multi-color emblem ring (echoes logo framing) -->
+  <circle cx="960" cy="470" r="270" fill="none" stroke="url(#ring4)" stroke-width="3" stroke-opacity="0.85"/>
+  <circle cx="960" cy="470" r="300" fill="none" stroke="#00e5ff" stroke-width="1.5" stroke-opacity="0.3"/>
+  <!-- ring tick marks (N/E/S/W) -->
+  <g stroke="#ffe08a" stroke-width="3" stroke-opacity="0.8">
+    <line x1="960" y1="185" x2="960" y2="215"/>
+    <line x1="960" y1="725" x2="960" y2="755"/>
+    <line x1="675" y1="470" x2="705" y2="470"/>
+    <line x1="1215" y1="470" x2="1245" y2="470"/>
+  </g>
+
+  <!-- red ink brush sweeps, opposite corners -->
+  <g filter="url(#blur4)">
+    <path d="M-100 -60 C 260 120 300 360 120 520 C -80 380 -160 160 -100 -60 Z" fill="url(#inkBrush4)" opacity="0.75"/>
+    <path d="M2020 1140 C 1660 960 1620 720 1800 560 C 2000 700 2080 920 2020 1140 Z" fill="url(#inkBrush4)" opacity="0.75"/>
+  </g>
+
+  <!-- cyan + gold particles -->
+  <g>
+    <circle cx="560" cy="300" r="2.6" fill="#00e5ff" opacity="0.85"/>
+    <circle cx="1360" cy="340" r="2.2" fill="#00e5ff" opacity="0.7"/>
+    <circle cx="700" cy="640" r="2" fill="#ffcf6b" opacity="0.6"/>
+    <circle cx="1240" cy="620" r="2.4" fill="#ffcf6b" opacity="0.65"/>
+    <circle cx="880" cy="240" r="1.6" fill="#00e5ff" opacity="0.6"/>
+    <circle cx="1080" cy="690" r="1.8" fill="#00e5ff" opacity="0.55"/>
+  </g>
+
+  <radialGradient id="vig4" cx="50%" cy="44%" r="72%">
+    <stop offset="58%" stop-color="#000000" stop-opacity="0"/>
+    <stop offset="100%" stop-color="#000000" stop-opacity="0.6"/>
+  </radialGradient>
+  <rect width="1920" height="1080" fill="url(#vig4)"/>
+</svg>

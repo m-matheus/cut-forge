@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- ENKAI intro background 03 — "Soundwave" -->
+<!-- 1920x1080 · fully vector · NO text · horizontal audio-wave motif -->
+<svg xmlns="http://www.w3.org/2000/svg" width="1920" height="1080" viewBox="0 0 1920 1080">
+  <defs>
+    <radialGradient id="bg3" cx="50%" cy="50%" r="75%">
+      <stop offset="0%"  stop-color="#0d1c40"/>
+      <stop offset="60%" stop-color="#0a1430"/>
+      <stop offset="100%" stop-color="#050c1c"/>
+    </radialGradient>
+
+    <linearGradient id="waveGrad" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%"   stop-color="#00e5ff" stop-opacity="0.15"/>
+      <stop offset="30%"  stop-color="#ffb638"/>
+      <stop offset="50%"  stop-color="#ffe08a"/>
+      <stop offset="70%"  stop-color="#ffb638"/>
+      <stop offset="100%" stop-color="#00e5ff" stop-opacity="0.15"/>
+    </linearGradient>
+
+    <radialGradient id="centerGlow3" cx="50%" cy="50%" r="45%">
+      <stop offset="0%"  stop-color="#ffcf6b" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#ffcf6b" stop-opacity="0"/>
+    </radialGradient>
+
+    <filter id="glow3" x="-20%" y="-40%" width="140%" height="180%">
+      <feGaussianBlur stdDeviation="3.2" result="b"/>
+      <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <rect width="1920" height="1080" fill="url(#bg3)"/>
+  <ellipse cx="960" cy="540" rx="720" ry="360" fill="url(#centerGlow3)"/>
+
+  <!-- faint horizontal baseline -->
+  <line x1="120" y1="540" x2="1800" y2="540" stroke="#ffb638" stroke-opacity="0.15" stroke-width="1"/>
+
+  <!-- symmetric equalizer bars, tallest in the middle -->
+  <g fill="url(#waveGrad)" filter="url(#glow3)">
+    <!-- bars are drawn programmatically-looking but static; edit heights freely -->
+    <rect x="140"  y="520" width="10" height="40"  rx="5"/>
+    <rect x="176"  y="505" width="10" height="70"  rx="5"/>
+    <rect x="212"  y="490" width="10" height="100" rx="5"/>
+    <rect x="248"  y="512" width="10" height="56"  rx="5"/>
+    <rect x="284"  y="470" width="10" height="140" rx="5"/>
+    <rect x="320"  y="500" width="10" height="80"  rx="5"/>
+    <rect x="356"  y="450" width="10" height="180" rx="5"/>
+    <rect x="392"  y="486" width="10" height="108" rx="5"/>
+    <rect x="428"  y="430" width="10" height="220" rx="5"/>
+    <rect x="464"  y="498" width="10" height="84"  rx="5"/>
+    <rect x="500"  y="400" width="10" height="280" rx="5"/>
+    <rect x="536"  y="474" width="10" height="132" rx="5"/>
+    <rect x="572"  y="360" width="10" height="360" rx="5"/>
+    <rect x="608"  y="462" width="10" height="156" rx="5"/>
+    <rect x="644"  y="330" width="10" height="420" rx="5"/>
+    <rect x="680"  y="446" width="10" height="188" rx="5"/>
+    <rect x="716"  y="300" width="10" height="480" rx="5"/>
+    <rect x="752"  y="430" width="10" height="220" rx="5"/>
+    <rect x="788"  y="270" width="10" height="540" rx="5"/>
+    <rect x="824"  y="410" width="10" height="260" rx="5"/>
+    <rect x="860"  y="250" width="10" height="580" rx="5"/>
+    <rect x="896"  y="330" width="10" height="420" rx="5"/>
+    <rect x="932"  y="230" width="10" height="620" rx="5"/>
+    <rect x="968"  y="230" width="10" height="620" rx="5"/>
+    <rect x="1004" y="330" width="10" height="420" rx="5"/>
+    <rect x="1040" y="250" width="10" height="580" rx="5"/>
+    <rect x="1076" y="410" width="10" height="260" rx="5"/>
+    <rect x="1112" y="270" width="10" height="540" rx="5"/>
+    <rect x="1148" y="430" width="10" height="220" rx="5"/>
+    <rect x="1184" y="300" width="10" height="480" rx="5"/>
+    <rect x="1220" y="446" width="10" height="188" rx="5"/>
+    <rect x="1256" y="330" width="10" height="420" rx="5"/>
+    <rect x="1292" y="462" width="10" height="156" rx="5"/>
+    <rect x="1328" y="360" width="10" height="360" rx="5"/>
+    <rect x="1364" y="474" width="10" height="132" rx="5"/>
+    <rect x="1400" y="400" width="10" height="280" rx="5"/>
+    <rect x="1436" y="498" width="10" height="84"  rx="5"/>
+    <rect x="1472" y="430" width="10" height="220" rx="5"/>
+    <rect x="1508" y="486" width="10" height="108" rx="5"/>
+    <rect x="1544" y="450" width="10" height="180" rx="5"/>
+    <rect x="1580" y="500" width="10" height="80"  rx="5"/>
+    <rect x="1616" y="470" width="10" height="140" rx="5"/>
+    <rect x="1652" y="512" width="10" height="56"  rx="5"/>
+    <rect x="1688" y="490" width="10" height="100" rx="5"/>
+    <rect x="1724" y="505" width="10" height="70"  rx="5"/>
+    <rect x="1760" y="520" width="10" height="40"  rx="5"/>
+  </g>
+
+  <!-- seigaiha wave arcs echoing along the top -->
+  <g fill="none" stroke="#ffb638" stroke-opacity="0.14" stroke-width="2">
+    <path d="M120 120 Q 300 40 480 120 T 840 120 T 1200 120 T 1560 120 T 1800 120"/>
+    <path d="M120 150 Q 300 70 480 150 T 840 150 T 1200 150 T 1560 150 T 1800 150"/>
+  </g>
+
+  <!-- red ink accents bottom corners -->
+  <g fill="#c31226" opacity="0.55">
+    <path d="M0 1080 L0 880 C 160 940 300 1000 420 1080 Z"/>
+    <path d="M1920 1080 L1920 880 C 1760 940 1620 1000 1500 1080 Z"/>
+  </g>
+
+  <radialGradient id="vig3" cx="50%" cy="50%" r="72%">
+    <stop offset="60%" stop-color="#000000" stop-opacity="0"/>
+    <stop offset="100%" stop-color="#000000" stop-opacity="0.5"/>
+  </radialGradient>
+  <rect width="1920" height="1080" fill="url(#vig3)"/>
+</svg>
