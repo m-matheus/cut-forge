@@ -22,7 +22,7 @@ Importance = Literal["high", "medium", "low"]
 # (kept for context, NOT to be reused); UNCERTAIN is anything the miner is unsure about.
 FactCategory = Literal[
     "ability", "event", "relationship", "trait", "title", "symbol",
-    "theme", "easter_egg", "author_interpretation", "metaphor", "other",
+    "theme", "easter_egg", "author_interpretation", "metaphor", "role", "other",
 ]
 
 

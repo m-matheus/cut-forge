@@ -59,7 +59,7 @@ RULES
 OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
 {
   "character": "the character the reference is about (best guess)",
-  "facts": [ { "fact": "...", "category": "ability|event|relationship|trait|title|symbol|theme|other", "confidence": "high|medium|low" } ],
+  "facts": [ { "fact": "...", "category": "ability|event|relationship|trait|title|symbol|theme|role|other", "confidence": "high|medium|low" } ],
   "events": [ { "event": "...", "importance": "high|medium|low", "confidence": "high|medium|low" } ],
   "abilities": [ { "name": "...", "description": "...", "confidence": "high|medium|low" } ],
   "relationships": [ { "characters": ["...", "..."], "relationship": "...", "confidence": "high|medium|low" } ],
