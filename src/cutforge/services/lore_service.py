@@ -73,9 +73,24 @@ Every list may be empty. Return ONLY the JSON object.
 """
 
 
-def _build_user_prompt(project: VideoProject, transcript: str, source_title: str) -> str:
+def _build_user_prompt(project: VideoProject, transcript: str, source_title: str,
+                       user_instruction: str = "") -> str:
     who = project.character or project.topic or "the character"
-    lines = [f"Character this reference is about: {who}"]
+    lines = []
+    instruction = (user_instruction or "").strip()
+    if instruction:
+        lines += [
+            "!!! HIGH-PRIORITY USER STEERING (overrides default extraction focus) !!!",
+            "The user is RE-MINING this reference and gave an explicit instruction. "
+            "Prioritise it when deciding what to surface and emphasise, while still "
+            "obeying the system rules: extract KNOWLEDGE only (never reproduce the "
+            "reference's phrasing/hooks/metaphors as facts), and never invent lore that "
+            "is not supported by the transcript. If the instruction narrows or re-weights "
+            "focus (e.g. 'focus on his abilities', 'ignore relationships'), follow it.",
+            f"USER INSTRUCTION: {instruction}",
+            "",
+        ]
+    lines.append(f"Character this reference is about: {who}")
     if project.anime:
         lines.append(f"Anime / series: {project.anime}")
     if source_title:
@@ -92,10 +107,12 @@ def _build_user_prompt(project: VideoProject, transcript: str, source_title: str
 
 
 def mine_reference_lore(project: VideoProject, index: int = 0, *, refresh: bool = False,
+                        user_instruction: str = "",
                         on_log=None) -> ReferenceLoreProfile | None:
     """Mine the reference transcript into a ReferenceLoreProfile (cached to disk).
 
     ``index`` selects which reference to mine (0 = primary).
+    ``user_instruction`` optionally steers what the miner emphasises (used on refresh).
     Returns ``None`` when there is no reference to mine. The result is persisted to
     ``project.ref_lore_profile_path(index)`` and reused on subsequent calls unless
     ``refresh=True``.
@@ -121,7 +138,7 @@ def mine_reference_lore(project: VideoProject, index: int = 0, *, refresh: bool 
         return None
 
     source_title = music_profile.get("source_title", "")
-    user_prompt = _build_user_prompt(project, transcript, source_title)
+    user_prompt = _build_user_prompt(project, transcript, source_title, user_instruction)
 
     log(f"Mining reference {index} transcript for character lore…")
     data = anthropic_client.complete_json(LORE_MINER_SYSTEM_PROMPT, user_prompt)

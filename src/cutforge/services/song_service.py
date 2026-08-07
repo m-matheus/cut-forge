@@ -462,6 +462,39 @@ def suggest_genres(project: VideoProject, **_ignored) -> GenreSuggestions:
     return GenreSuggestions(character_read=character_read, directions=all_directions)
 
 
+def _format_instruction_note(user_instruction: str, *, domain: str) -> str:
+    """Return a high-priority steering block for a regeneration, or "" when empty.
+
+    ``domain`` is "direction" or "lore" — only the flavour text differs. The note is
+    meant to be prepended to the USER prompt so the model weights it heavily while the
+    SYSTEM prompt's non-negotiable rules still bound it.
+    """
+    instruction = (user_instruction or "").strip()
+    if not instruction:
+        return ""
+    if domain == "lore":
+        return (
+            "!!! HIGH-PRIORITY USER STEERING (overrides default extraction focus) !!!\n"
+            "The user is RE-MINING this reference and gave an explicit instruction. "
+            "Prioritise it when deciding what to surface and emphasise, while still "
+            "obeying the system rules: extract KNOWLEDGE only (never reproduce the "
+            "reference's phrasing/hooks/metaphors as facts), and never invent lore that "
+            "is not supported by the transcript. If the instruction narrows or re-weights "
+            "focus (e.g. 'focus on his abilities', 'ignore relationships'), follow it.\n"
+            f"USER INSTRUCTION: {instruction}\n"
+        )
+    return (
+        "!!! HIGH-PRIORITY USER STEERING (overrides default creative choices) !!!\n"
+        "The user is REGENERATING this brief and gave an explicit instruction. Treat it "
+        "as the top priority when it conflicts with your default instincts. Obey it while "
+        "still respecting the non-negotiable rules in the system prompt (originality vs. "
+        "the reference, lore = knowledge not lyrics to reuse). If the instruction says to "
+        "avoid a theme/metaphor, do NOT reintroduce it; if it says to emphasise something, "
+        "make it the spine of the brief.\n"
+        f"USER INSTRUCTION: {instruction}\n"
+    )
+
+
 def plan_creative_direction(
     project: VideoProject,
     genre: str,
@@ -469,20 +502,27 @@ def plan_creative_direction(
     music_profile: dict | None = None,
     lore_profile: ReferenceLoreProfile | None = None,
     is_vs: bool = False,
+    user_instruction: str = "",
     refresh: bool = False,
 ) -> CreativeDirection:
     """Plan the original-song brief (cached to ``creative_direction_path``).
 
     Answers "what is the NEW song?" from the character, the chosen genre and — when a
     reference exists — its music profile and mined lore. Persisted so a re-run of the
-    lyrics step does not re-plan unless ``refresh=True``.
+    lyrics step does not re-plan unless ``refresh=True``. ``user_instruction`` is an
+    optional free-text steering note (used when regenerating) — it is injected into the
+    prompt but never persisted onto the model.
     """
     if project.creative_direction_path.exists() and not refresh:
         data = json.loads(project.creative_direction_path.read_text(encoding="utf-8"))
         return CreativeDirection(**data)
 
     topic = project.topic or project.character
-    lines = [
+    lines = []
+    note = _format_instruction_note(user_instruction, domain="direction")
+    if note:
+        lines += [note, ""]
+    lines += [
         f"Character / matchup: {topic}",
         f"Chosen genre / sonic direction: {genre}",
     ]
@@ -524,6 +564,7 @@ def plan_creative_direction(
 def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
                      reference_profile: dict | None = None,
                      ref_index: int = 0,
+                     user_instruction: str = "",
                      refresh: bool = False,
                      refresh_lore: bool = False,
                      on_log=None,
@@ -533,6 +574,7 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
     ``ref_index`` selects which reference provides the sonic DNA (BPM/flow/style).
     All available references contribute lore (merged and deduplicated).
     ``refresh`` re-plans the creative direction; ``refresh_lore`` re-mines all lore.
+    ``user_instruction`` optionally steers the creative-direction re-plan.
     """
     from cutforge.services import lore_service, reference_service
 
@@ -557,7 +599,7 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
     direction = plan_creative_direction(
         project, genre,
         music_profile=reference_profile, lore_profile=lore_profile,
-        is_vs=is_vs, refresh=refresh,
+        is_vs=is_vs, user_instruction=user_instruction, refresh=refresh,
     )
 
     topic = project.topic or project.character

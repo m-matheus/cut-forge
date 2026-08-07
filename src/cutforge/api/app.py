@@ -154,9 +154,11 @@ def create_app() -> FastAPI:
     def refresh_lore_profile(run_id: str, payload: dict | None = None):
         data = payload or {}
         index = int(data.get("index", 0))
+        instruction = (data.get("instruction") or "").strip()
         project = VideoProject.load(run_id)
         from cutforge.services import lore_service
-        profile = lore_service.mine_reference_lore(project, index=index, refresh=True)
+        profile = lore_service.mine_reference_lore(
+            project, index=index, refresh=True, user_instruction=instruction)
         if not profile:
             return JSONResponse({"error": "no reference to mine"}, status_code=404)
         # Return merged view so the UI always sees the full picture.
@@ -180,6 +182,7 @@ def create_app() -> FastAPI:
         if not genre:
             return JSONResponse({"error": "genre is required"}, status_code=400)
         ref_index = int(data.get("ref_index", 0))
+        instruction = (data.get("instruction") or "").strip()
         project = VideoProject.load(run_id)
         from cutforge.services import lore_service, reference_service
         music_profile = reference_service.load_reference_profile(project, index=ref_index)
@@ -188,6 +191,7 @@ def create_app() -> FastAPI:
         direction = song_service.plan_creative_direction(
             project, genre,
             music_profile=music_profile, lore_profile=lore_profile,
+            user_instruction=instruction,
             refresh=True,
         )
         return direction.model_dump()

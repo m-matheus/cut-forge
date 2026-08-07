@@ -125,6 +125,14 @@ def run_step(run_id: str, step_id: str, params: dict | None = None, *,
     project = VideoProject.load(run_id)
     step = STEP_BY_ID[step_id]
 
+    # The reference step's is_done only knows about index 0, so adding a NEW reference
+    # (index 1, 2, …) would otherwise be short-circuited by the generic gate below.
+    # A request for an index whose profile doesn't exist yet is not "done" — let it run.
+    if step_id == "reference" and not force:
+        idx = int(params.get("index", 0))
+        if not project.ref_profile_path(idx).exists():
+            force = True
+
     if step.is_done(project) and not force:
         log(f"[{step_id}] já concluído — pulando (use force para refazer).")
         return {"status": "skipped"}

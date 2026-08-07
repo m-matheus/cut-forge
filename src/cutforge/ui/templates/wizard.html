@@ -116,15 +116,17 @@
 
                   <!-- Lore panel -->
                   <template x-if="loreProfile">
-                    <details class="output-preview">
-                      <summary>
-                        Lore extraído da referência
-                        <button class="secondary outline copy-btn" style="margin-left:.75rem"
-                                @click.prevent="refreshLore()" :aria-busy="busy.lore" :disabled="busy.lore">
-                          Regenerar lore
-                        </button>
-                      </summary>
+                    <details class="output-preview" open>
+                      <summary>Lore extraído da referência</summary>
                       <div class="output-block" style="font-size:.8rem">
+                        <div style="margin-bottom:.6rem">
+                          <textarea rows="2" x-model="loreInstruction" style="width:100%;font-size:.8rem"
+                                    placeholder="Instrução opcional p/ regenerar lore (ex: 'foque nas habilidades, ignore relacionamentos')"></textarea>
+                          <button class="secondary outline copy-btn" style="margin-top:.35rem"
+                                  @click="refreshLore()" :aria-busy="busy.lore" :disabled="busy.lore">
+                            Regenerar lore
+                          </button>
+                        </div>
                         <template x-if="loreProfile.facts && loreProfile.facts.length">
                           <div>
                             <strong>Facts</strong>
@@ -181,15 +183,17 @@
 
                   <!-- Creative direction panel -->
                   <template x-if="creativeDirection">
-                    <details class="output-preview">
-                      <summary>
-                        Direção criativa planejada
-                        <button class="secondary outline copy-btn" style="margin-left:.75rem"
-                                @click.prevent="refreshCreativeDirection()" :aria-busy="busy.direction" :disabled="busy.direction || !chosenGenre">
-                          Regenerar direção
-                        </button>
-                      </summary>
+                    <details class="output-preview" open>
+                      <summary>Direção criativa planejada</summary>
                       <div class="output-block" style="font-size:.8rem">
+                        <div style="margin-bottom:.6rem">
+                          <textarea rows="2" x-model="directionInstruction" style="width:100%;font-size:.8rem"
+                                    placeholder="Instrução opcional p/ regenerar (ex: 'mude a direção da metáfora, evite o tema escolar, foque no poder dele')"></textarea>
+                          <button class="secondary outline copy-btn" style="margin-top:.35rem"
+                                  @click="refreshCreativeDirection()" :aria-busy="busy.direction" :disabled="busy.direction || !chosenGenre">
+                            Regenerar direção
+                          </button>
+                        </div>
                         <template x-if="creativeDirection.core_theme">
                           <p><strong>Tema central:</strong> <span x-text="creativeDirection.core_theme"></span></p>
                         </template>
@@ -400,6 +404,8 @@ function wizard(runId, initialSteps, saved) {
     chosenRefIndex: 0,
     loreProfile: null,
     creativeDirection: null,
+    loreInstruction: '',
+    directionInstruction: '',
     footageUrl: saved.footageUrl || '',
     referenceUrls: saved.referenceUrls || [],
     newReferenceUrl: '',
@@ -508,8 +514,12 @@ function wizard(runId, initialSteps, saved) {
     async refreshLore() {
       this.busy.lore = true;
       try {
-        const r = await fetch(`/api/runs/${this.runId}/lore-profile/refresh`, { method: 'POST' });
-        if (r.ok) this.loreProfile = await r.json();
+        const r = await fetch(`/api/runs/${this.runId}/lore-profile/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ index: this.chosenRefIndex, instruction: this.loreInstruction.trim() }),
+        });
+        if (r.ok) { this.loreProfile = await r.json(); this.loreInstruction = ''; }
       } finally { this.busy.lore = false; }
     },
 
@@ -520,9 +530,9 @@ function wizard(runId, initialSteps, saved) {
         const r = await fetch(`/api/runs/${this.runId}/creative-direction/refresh`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ genre: this.chosenGenre, ref_index: this.chosenRefIndex }),
+          body: JSON.stringify({ genre: this.chosenGenre, ref_index: this.chosenRefIndex, instruction: this.directionInstruction.trim() }),
         });
-        if (r.ok) this.creativeDirection = await r.json();
+        if (r.ok) { this.creativeDirection = await r.json(); this.directionInstruction = ''; }
       } finally { this.busy.direction = false; }
     },
 
