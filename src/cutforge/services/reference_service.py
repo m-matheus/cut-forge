@@ -4,9 +4,12 @@ Produces a small "reference profile" (lyrics transcript + BPM + flow metrics) th
 lyrics-generation step (``song_service.generate_package``) detects on disk and uses to
 write an ORIGINAL, non-infringing song with a matching flow/energy/structure.
 
-Reuses ``youtube_dl.download_audio`` (audio-only fetch), ``stable_whisper_client.transcribe_words``
-(local stable-ts transcription with anti-repetition flags, cached) and
-``librosa_client.analyze_rhythm`` (BPM/beat, cached).
+Multiple references are supported. Each is stored under ``reference/{index}/`` (e.g.
+``reference/0/``, ``reference/1/``). The first reference (index 0) is the "primary" —
+its sonic DNA (BPM/flow) drives the style. All references contribute lore.
+
+Legacy runs that used the old flat layout (``reference/reference_profile.json``) are
+transparently read as a single reference at index 0.
 """
 from __future__ import annotations
 
@@ -20,42 +23,46 @@ def _reconstruct_lyrics(words: list[dict]) -> str:
     """Rebuild a plain transcript from Whisper word tokens."""
     if not words:
         return ""
-    # Whisper word tokens usually carry no leading space; join with spaces.
     return " ".join(w["word"].strip() for w in words if w.get("word", "").strip())
 
 
-def analyze_reference(project: VideoProject, url: str, *, refresh: bool = False,
-                      on_log=None) -> dict:
-    """Download, transcribe and rhythm-analyze the reference rap. Returns the profile."""
+def analyze_reference(project: VideoProject, url: str, index: int = 0,
+                      *, refresh: bool = False, on_log=None) -> dict:
+    """Download, transcribe and rhythm-analyze one reference rap. Returns the profile.
+
+    ``index`` selects the sub-folder (0 = primary, 1 = second reference, …).
+    The result is written to ``reference/{index}/reference_profile.json``.
+    ``project.reference_urls`` is updated and saved.
+    """
     log = on_log or (lambda _m: None)
 
-    # 1. Download audio-only.
-    meta = youtube_dl.download_audio(url, project.reference_audio_path, on_log=log)
+    audio_path = project.ref_audio_path(index)
+    whisper_path = project.ref_whisper_path(index)
+    rhythm_path = project.ref_rhythm_path(index)
+    lyrics_path = project.ref_lyrics_path(index)
+    profile_path = project.ref_profile_path(index)
 
-    # 2. Transcribe (cached). Use stable-ts transcribe() with anti-repetition flags:
-    #    cloud whisper-1 loops on musical/instrumental sections and echoes the last
-    #    recognised phrase (e.g. an intro channel promo), spamming the transcript and
-    #    swallowing the real lyrics. language=None auto-detects the reference's language.
+    audio_path.parent.mkdir(parents=True, exist_ok=True)
+
+    meta = youtube_dl.download_audio(url, audio_path, on_log=log)
+
     words = stable_whisper_client.transcribe_words(
-        project.reference_audio_path,
-        cache_path=project.reference_whisper_path,
+        audio_path,
+        cache_path=whisper_path,
         refresh=refresh,
         language=None,
         on_log=log,
     )
     transcript = _reconstruct_lyrics(words)
-    project.reference_lyrics_path.parent.mkdir(parents=True, exist_ok=True)
-    project.reference_lyrics_path.write_text(transcript, encoding="utf-8")
+    lyrics_path.write_text(transcript, encoding="utf-8")
 
-    # 3. Rhythm analysis (cached).
     rhythm = librosa_client.analyze_rhythm(
-        project.reference_audio_path,
-        cache_path=project.reference_rhythm_path,
+        audio_path,
+        cache_path=rhythm_path,
         refresh=refresh,
         on_log=log,
     )
 
-    # 4. Flow metrics from Whisper timing.
     bpm = rhythm.get("bpm", 0) or 0
     word_count = len(words)
     span = 0.0
@@ -64,7 +71,6 @@ def analyze_reference(project: VideoProject, url: str, *, refresh: bool = False,
     words_per_sec = round(word_count / span, 2) if span > 0 else 0.0
     syllables_per_beat = round(words_per_sec * 60.0 / bpm, 2) if bpm > 0 else 0.0
 
-    # 5. Assemble the profile (omit the large beat_times array from the prompt payload).
     profile = {
         "source_url": url,
         "source_title": meta.get("title", ""),
@@ -80,18 +86,57 @@ def analyze_reference(project: VideoProject, url: str, *, refresh: bool = False,
         "transcript": transcript,
     }
 
-    project.reference_profile_path.write_text(
-        json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    project.reference_url = url
+    profile_path.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # Keep reference_urls in sync.
+    urls = list(project.reference_urls)
+    while len(urls) <= index:
+        urls.append("")
+    urls[index] = url
+    project.reference_urls = urls
     project.save()
 
-    log(f"Reference profile saved: {profile['bpm']} BPM, {word_count} words.")
+    log(f"Reference {index} profile saved: {profile['bpm']} BPM, {word_count} words.")
     return profile
 
 
-def load_reference_profile(project: VideoProject) -> dict | None:
-    """Return the saved reference profile, or None if this run has no reference."""
-    if not project.reference_profile_path.exists():
-        return None
-    return json.loads(project.reference_profile_path.read_text(encoding="utf-8"))
+def load_reference_profile(project: VideoProject, index: int = 0) -> dict | None:
+    """Return the saved profile for one reference, or None if it does not exist.
+
+    Falls back to the legacy flat layout (``reference/reference_profile.json``) when
+    the indexed sub-folder does not exist and ``index == 0``.
+    """
+    indexed_path = project.ref_profile_path(index)
+    if indexed_path.exists():
+        return json.loads(indexed_path.read_text(encoding="utf-8"))
+    # Legacy flat layout (runs created before multi-reference support).
+    if index == 0 and project.reference_profile_path.exists():
+        return json.loads(project.reference_profile_path.read_text(encoding="utf-8"))
+    return None
+
+
+def load_all_reference_profiles(project: VideoProject) -> list[dict]:
+    """Return all reference profiles for this run, in index order.
+
+    The legacy flat profile (if present and no indexed sub-folders exist) is returned
+    as a single-element list at index 0.
+    """
+    profiles = []
+    for i in range(max(len(project.reference_urls), 1)):
+        p = load_reference_profile(project, index=i)
+        if p is not None:
+            profiles.append(p)
+    return profiles
+
+
+def remove_reference(project: VideoProject, index: int) -> None:
+    """Remove one reference: delete its sub-folder and update project.reference_urls."""
+    import shutil
+    ref_dir = project.ref_dir(index)
+    if ref_dir.exists():
+        shutil.rmtree(ref_dir)
+    urls = list(project.reference_urls)
+    if index < len(urls):
+        urls.pop(index)
+    project.reference_urls = urls
+    project.save()

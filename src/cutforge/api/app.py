@@ -117,6 +117,81 @@ def create_app() -> FastAPI:
         mood = song_service.suggest_mood(character, data.get("anime", ""))
         return {"mood": mood}
 
+    # ---- References list ----
+    @app.get("/api/runs/{run_id}/references")
+    def list_references(run_id: str):
+        project = VideoProject.load(run_id)
+        from cutforge.services import reference_service
+        profiles = reference_service.load_all_reference_profiles(project)
+        return {
+            "urls": project.reference_urls,
+            "profiles": [
+                {"index": i, "source_title": p.get("source_title", ""),
+                 "bpm": p.get("bpm"), "source_url": p.get("source_url", "")}
+                for i, p in enumerate(profiles)
+            ],
+        }
+
+    @app.delete("/api/runs/{run_id}/references/{index}")
+    def delete_reference(run_id: str, index: int):
+        project = VideoProject.load(run_id)
+        from cutforge.services import reference_service
+        reference_service.remove_reference(project, index)
+        return {"status": "deleted", "index": index}
+
+    # ---- Lore profile (character knowledge mined from reference) ----
+    @app.get("/api/runs/{run_id}/lore-profile")
+    def get_lore_profile(run_id: str):
+        project = VideoProject.load(run_id)
+        from cutforge.services import lore_service
+        profiles = lore_service.load_all_lore_profiles(project)
+        merged = lore_service.merge_lore_profiles(profiles)
+        if not merged:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return merged.model_dump()
+
+    @app.post("/api/runs/{run_id}/lore-profile/refresh")
+    def refresh_lore_profile(run_id: str, payload: dict | None = None):
+        data = payload or {}
+        index = int(data.get("index", 0))
+        project = VideoProject.load(run_id)
+        from cutforge.services import lore_service
+        profile = lore_service.mine_reference_lore(project, index=index, refresh=True)
+        if not profile:
+            return JSONResponse({"error": "no reference to mine"}, status_code=404)
+        # Return merged view so the UI always sees the full picture.
+        all_profiles = lore_service.load_all_lore_profiles(project)
+        merged = lore_service.merge_lore_profiles(all_profiles)
+        return merged.model_dump() if merged else profile.model_dump()
+
+    # ---- Creative direction (original-song brief) ----
+    @app.get("/api/runs/{run_id}/creative-direction")
+    def get_creative_direction(run_id: str):
+        project = VideoProject.load(run_id)
+        if not project.creative_direction_path.exists():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        import json as _json
+        return _json.loads(project.creative_direction_path.read_text(encoding="utf-8"))
+
+    @app.post("/api/runs/{run_id}/creative-direction/refresh")
+    def refresh_creative_direction(run_id: str, payload: dict | None = None):
+        data = payload or {}
+        genre = (data.get("genre") or "").strip()
+        if not genre:
+            return JSONResponse({"error": "genre is required"}, status_code=400)
+        ref_index = int(data.get("ref_index", 0))
+        project = VideoProject.load(run_id)
+        from cutforge.services import lore_service, reference_service
+        music_profile = reference_service.load_reference_profile(project, index=ref_index)
+        all_lores = lore_service.load_all_lore_profiles(project)
+        lore_profile = lore_service.merge_lore_profiles(all_lores)
+        direction = song_service.plan_creative_direction(
+            project, genre,
+            music_profile=music_profile, lore_profile=lore_profile,
+            refresh=True,
+        )
+        return direction.model_dump()
+
     # ---- Run a step (background thread; progress via SSE) ----
     @app.post("/api/runs/{run_id}/steps/{step_id}")
     def run_step(run_id: str, step_id: str, payload: dict | None = None):

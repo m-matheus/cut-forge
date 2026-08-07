@@ -41,7 +41,9 @@ STEPS: list[Step] = [
     Step(
         id="reference",
         label="Rap de referência (opcional)",
-        is_done=lambda p: p.reference_profile_path.exists(),
+        is_done=lambda p: (
+            p.ref_profile_path(0).exists() or p.reference_profile_path.exists()
+        ),
         can_run=_always,
         requires_hint="Cole a URL do YouTube do rap de referência.",
     ),

@@ -36,11 +36,17 @@ class VideoProject(BaseModel):
     # Filled by later steps
     title: str = ""
     footage_url: str = ""
-    reference_url: str = ""       # YouTube URL of a reference rap (optional inspiration)
-    # DEPRECATED — kept only so old project.json files still load. The reference's
-    # lyrical CONTENT is never borrowed anymore: the transcript feeds lore mining and
-    # the final song is always an original composition. No longer read by any service.
+    reference_urls: list[str] = Field(default_factory=list)
+    # DEPRECATED — kept so old project.json files still load. Migrated to
+    # reference_urls on first load via model_post_init.
+    reference_url: str = ""
+    # DEPRECATED — kept only so old project.json files still load.
     content_blend: str = "rhythm"
+
+    def model_post_init(self, __context) -> None:
+        # Migrate legacy single reference_url → reference_urls list.
+        if self.reference_url and not self.reference_urls:
+            self.reference_urls = [self.reference_url]
 
     # --- Channel (not serialized; resolved on demand) ---
     @property
@@ -117,11 +123,33 @@ class VideoProject(BaseModel):
     def title_card_path(self) -> Path:
         return self.premiere_dir / "title_card.png"
 
-    # --- Reference rap (optional inspiration source) ---
+    # --- Reference rap(s) (optional inspiration sources) ---
     @property
     def reference_dir(self) -> Path:
         return self.run_dir / "reference"
 
+    def ref_dir(self, index: int) -> Path:
+        return self.reference_dir / str(index)
+
+    def ref_audio_path(self, index: int) -> Path:
+        return self.ref_dir(index) / "reference.mp3"
+
+    def ref_whisper_path(self, index: int) -> Path:
+        return self.ref_dir(index) / "reference_whisper.json"
+
+    def ref_lyrics_path(self, index: int) -> Path:
+        return self.ref_dir(index) / "reference_lyrics.txt"
+
+    def ref_rhythm_path(self, index: int) -> Path:
+        return self.ref_dir(index) / "reference_rhythm.json"
+
+    def ref_profile_path(self, index: int) -> Path:
+        return self.ref_dir(index) / "reference_profile.json"
+
+    def ref_lore_profile_path(self, index: int) -> Path:
+        return self.ref_dir(index) / "reference_lore_profile.json"
+
+    # --- Legacy single-reference paths (backward compat — old flat layout) ---
     @property
     def reference_audio_path(self) -> Path:
         return self.reference_dir / "reference.mp3"
@@ -144,8 +172,6 @@ class VideoProject(BaseModel):
 
     @property
     def reference_lore_profile_path(self) -> Path:
-        # Character KNOWLEDGE mined from the reference transcript (separate from the
-        # music profile above). Cached so lore is only extracted once per run.
         return self.reference_dir / "reference_lore_profile.json"
 
     @property

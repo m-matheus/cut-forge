@@ -10,6 +10,7 @@ class GenreDirection(BaseModel):
     label: str
     style: str
     why: str = ""
+    ref_index: int = 0  # which reference this direction was derived from
 
 
 class GenreSuggestions(BaseModel):

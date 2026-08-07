@@ -10,7 +10,7 @@
 </nav>
 
 <article
-  x-data='wizard("{{ project.run_id }}", {{ steps | tojson }}, {{ {"footageUrl": project.footage_url, "referenceUrl": project.reference_url} | tojson }})'
+  x-data='wizard("{{ project.run_id }}", {{ steps | tojson }}, {{ {"footageUrl": project.footage_url, "referenceUrls": project.reference_urls} | tojson }})'
   x-init="init()">
 
   <hgroup>
@@ -33,28 +33,41 @@
 
           <div class="step-body" x-show="openStep===step.id">
 
-            <!-- REFERENCE (optional) -->
+            <!-- REFERENCE (optional, multiple) -->
             <template x-if="step.id === 'reference'">
               <div>
-                <p><small>Cole a URL de um rap que você curte. Baixamos o áudio, transcrevemos
-                   a letra e extraímos o BPM/ritmo para inspirar a geração — a música gerada é
-                   <strong>autoral</strong>, nunca copiada.</small></p>
-                <input placeholder="URL do YouTube (rap de referência)" x-model="referenceUrl">
-                <button @click="runStep('reference', { url: referenceUrl })"
-                        :disabled="!referenceUrl || running"
-                        :aria-busy="running && current==='reference'">Analisar referência</button>
-                <template x-if="step.status==='done' && referenceOutput.bpm">
-                  <details class="output-preview" open>
-                    <summary>Perfil da referência</summary>
-                    <div class="output-block">
-                      <p><strong x-text="referenceOutput.source_title"></strong></p>
-                      <p class="muted">
-                        <span x-text="referenceOutput.bpm + ' BPM'"></span> ·
-                        <span x-text="(referenceOutput.flow?.words_per_sec ?? '?') + ' palavras/s'"></span>
-                      </p>
-                    </div>
-                  </details>
+                <p><small>Cole a URL de um rap que você curte. A <strong>primeira</strong> referência define o som (BPM/flow); todas contribuem com lore. A música gerada é <strong>autoral</strong>, nunca copiada.</small></p>
+
+                <!-- List of already-added references -->
+                <template x-if="referenceProfiles.length > 0">
+                  <div style="margin-bottom:.75rem">
+                    <template x-for="ref in referenceProfiles" :key="ref.index">
+                      <div class="output-block" style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem;padding:.5rem .75rem">
+                        <span style="font-size:.7rem;opacity:.5" x-text="`#${ref.index + 1}`"></span>
+                        <div style="flex:1;min-width:0">
+                          <strong style="font-size:.85rem" x-text="ref.source_title || ref.source_url"></strong>
+                          <span class="muted" style="font-size:.75rem;margin-left:.4rem" x-text="ref.bpm ? ref.bpm + ' BPM' : ''"></span>
+                          <template x-if="ref.index === 0">
+                            <span style="font-size:.7rem;margin-left:.4rem;opacity:.6">(som primário)</span>
+                          </template>
+                        </div>
+                        <button class="secondary outline" style="padding:.2rem .5rem;font-size:.75rem"
+                                @click="removeReference(ref.index)" :disabled="running">✕</button>
+                      </div>
+                    </template>
+                  </div>
                 </template>
+
+                <!-- Add new reference -->
+                <div style="display:flex;gap:.5rem;align-items:flex-start">
+                  <input style="flex:1" placeholder="URL do YouTube (rap de referência)" x-model="newReferenceUrl"
+                         @keydown.enter.prevent="addReference()">
+                  <button @click="addReference()"
+                          :disabled="!newReferenceUrl.trim() || running"
+                          :aria-busy="running && current==='reference'">
+                    <span x-text="referenceProfiles.length > 0 ? '+ Adicionar' : 'Analisar'"></span>
+                  </button>
+                </div>
               </div>
             </template>
 
@@ -80,16 +93,142 @@
                   <template x-if="genres.length">
                     <div class="genres">
                       <template x-for="(g, i) in genres" :key="i">
-                        <label class="genre-opt" :class="chosenGenre===g.style ? 'genre-opt-selected' : ''">
+                        <label class="genre-opt" :class="chosenGenre===g.style ? 'genre-opt-selected' : ''"
+                               @click="chosenRefIndex = g.ref_index ?? 0">
                           <input type="radio" name="genre" :value="g.style" x-model="chosenGenre">
-                          <strong x-text="g.label"></strong>
+                          <div style="display:flex;align-items:center;gap:.4rem">
+                            <strong x-text="g.label"></strong>
+                            <template x-if="g.ref_index > 0">
+                              <span style="font-size:.65rem;opacity:.55" x-text="`ref #${g.ref_index + 1}`"></span>
+                            </template>
+                          </div>
                           <small x-text="g.style"></small>
                           <small class="muted" x-text="g.why"></small>
                         </label>
                       </template>
+                      <button class="secondary outline" style="margin-top:.5rem" @click="suggestGenres()"
+                              :aria-busy="busy.suggest" :disabled="busy.suggest">
+                        + Sugerir mais
+                      </button>
                     </div>
                   </template>
                   <input placeholder="…ou cole um estilo Suno" x-model="chosenGenre">
+
+                  <!-- Lore panel -->
+                  <template x-if="loreProfile">
+                    <details class="output-preview">
+                      <summary>
+                        Lore extraído da referência
+                        <button class="secondary outline copy-btn" style="margin-left:.75rem"
+                                @click.prevent="refreshLore()" :aria-busy="busy.lore" :disabled="busy.lore">
+                          Regenerar lore
+                        </button>
+                      </summary>
+                      <div class="output-block" style="font-size:.8rem">
+                        <template x-if="loreProfile.facts && loreProfile.facts.length">
+                          <div>
+                            <strong>Facts</strong>
+                            <ul style="margin:.25rem 0 .5rem 1rem">
+                              <template x-for="f in loreProfile.facts" :key="f.fact">
+                                <li><span x-text="`[${f.category}/${f.confidence}] ${f.fact}`"></span></li>
+                              </template>
+                            </ul>
+                          </div>
+                        </template>
+                        <template x-if="loreProfile.abilities && loreProfile.abilities.length">
+                          <div>
+                            <strong>Abilities</strong>
+                            <ul style="margin:.25rem 0 .5rem 1rem">
+                              <template x-for="a in loreProfile.abilities" :key="a.name">
+                                <li><span x-text="`${a.name}: ${a.description}`"></span></li>
+                              </template>
+                            </ul>
+                          </div>
+                        </template>
+                        <template x-if="loreProfile.events && loreProfile.events.length">
+                          <div>
+                            <strong>Events</strong>
+                            <ul style="margin:.25rem 0 .5rem 1rem">
+                              <template x-for="e in loreProfile.events" :key="e.event">
+                                <li><span x-text="`[${e.importance}] ${e.event}`"></span></li>
+                              </template>
+                            </ul>
+                          </div>
+                        </template>
+                        <template x-if="loreProfile.easter_eggs && loreProfile.easter_eggs.length">
+                          <div>
+                            <strong>Easter eggs</strong>
+                            <ul style="margin:.25rem 0 .5rem 1rem">
+                              <template x-for="eg in loreProfile.easter_eggs" :key="eg.reference">
+                                <li><span x-text="`${eg.reference} → ${eg.interpreted_meaning}`"></span></li>
+                              </template>
+                            </ul>
+                          </div>
+                        </template>
+                        <template x-if="loreProfile.uncertain_items && loreProfile.uncertain_items.length">
+                          <div>
+                            <strong class="muted">Incertos (verificar)</strong>
+                            <ul style="margin:.25rem 0 .5rem 1rem">
+                              <template x-for="u in loreProfile.uncertain_items" :key="u">
+                                <li class="muted"><span x-text="u"></span></li>
+                              </template>
+                            </ul>
+                          </div>
+                        </template>
+                      </div>
+                    </details>
+                  </template>
+
+                  <!-- Creative direction panel -->
+                  <template x-if="creativeDirection">
+                    <details class="output-preview">
+                      <summary>
+                        Direção criativa planejada
+                        <button class="secondary outline copy-btn" style="margin-left:.75rem"
+                                @click.prevent="refreshCreativeDirection()" :aria-busy="busy.direction" :disabled="busy.direction || !chosenGenre">
+                          Regenerar direção
+                        </button>
+                      </summary>
+                      <div class="output-block" style="font-size:.8rem">
+                        <template x-if="creativeDirection.core_theme">
+                          <p><strong>Tema central:</strong> <span x-text="creativeDirection.core_theme"></span></p>
+                        </template>
+                        <template x-if="creativeDirection.narrative_angle">
+                          <p><strong>Ângulo narrativo:</strong> <span x-text="creativeDirection.narrative_angle"></span></p>
+                        </template>
+                        <template x-if="creativeDirection.emotional_arc">
+                          <p><strong>Arco emocional:</strong> <span x-text="creativeDirection.emotional_arc"></span></p>
+                        </template>
+                        <template x-if="creativeDirection.hook_concept">
+                          <p><strong>Conceito do hook:</strong> <span x-text="creativeDirection.hook_concept"></span></p>
+                        </template>
+                        <template x-if="creativeDirection.key_lore_points && creativeDirection.key_lore_points.length">
+                          <div>
+                            <strong>Lore a usar:</strong>
+                            <ul style="margin:.25rem 0 .5rem 1rem">
+                              <template x-for="pt in creativeDirection.key_lore_points" :key="pt">
+                                <li><span x-text="pt"></span></li>
+                              </template>
+                            </ul>
+                          </div>
+                        </template>
+                        <template x-if="creativeDirection.original_metaphor_direction">
+                          <p><strong>Direção metafórica:</strong> <span x-text="creativeDirection.original_metaphor_direction"></span></p>
+                        </template>
+                        <template x-if="creativeDirection.things_to_avoid && creativeDirection.things_to_avoid.length">
+                          <div>
+                            <strong class="muted">Evitar:</strong>
+                            <ul style="margin:.25rem 0 .5rem 1rem">
+                              <template x-for="av in creativeDirection.things_to_avoid" :key="av">
+                                <li class="muted"><span x-text="av"></span></li>
+                              </template>
+                            </ul>
+                          </div>
+                        </template>
+                      </div>
+                    </details>
+                  </template>
+
                   <button @click="generateLyrics(step)"
                           :disabled="!chosenGenre || running"
                           :aria-busy="running && current==='lyrics'">
@@ -255,17 +394,21 @@ function wizard(runId, initialSteps, saved) {
     running: false,
     current: null,
     openStep: null,
-    busy: { suggest: false },
+    busy: { suggest: false, lore: false, direction: false },
     genres: [],
     chosenGenre: '',
+    chosenRefIndex: 0,
+    loreProfile: null,
+    creativeDirection: null,
     footageUrl: saved.footageUrl || '',
-    referenceUrl: saved.referenceUrl || '',
+    referenceUrls: saved.referenceUrls || [],
+    newReferenceUrl: '',
+    referenceProfiles: [],
     genreBadge: '',
     trackUploaded: false,
     lyricsTab: 'generate',
     lyricsOutput: {},
     metadataOutput: {},
-    referenceOutput: {},
     hasReference: false,
     _es: null,
 
@@ -323,9 +466,13 @@ function wizard(runId, initialSteps, saved) {
 
     async loadOutputs() {
       const done = (id) => this.steps.find(s => s.id === id && s.status === 'done');
-      if (done('reference')) {
-        const r = await fetch(`/api/runs/${this.runId}/output/reference`);
-        if (r.ok) { this.referenceOutput = await r.json(); this.hasReference = true; }
+      // Always load reference list (may exist even if step is not "done" yet)
+      const refList = await fetch(`/api/runs/${this.runId}/references`);
+      if (refList.ok) {
+        const rd = await refList.json();
+        this.referenceProfiles = rd.profiles || [];
+        this.referenceUrls = rd.urls || [];
+        this.hasReference = this.referenceProfiles.length > 0;
       }
       if (done('lyrics')) {
         const r = await fetch(`/api/runs/${this.runId}/output/lyrics`);
@@ -335,6 +482,11 @@ function wizard(runId, initialSteps, saved) {
         const r = await fetch(`/api/runs/${this.runId}/output/metadata`);
         if (r.ok) this.metadataOutput = await r.json();
       }
+      // Load lore + creative direction if available (they may exist even before lyrics)
+      const lr = await fetch(`/api/runs/${this.runId}/lore-profile`);
+      if (lr.ok) this.loreProfile = await lr.json();
+      const cr = await fetch(`/api/runs/${this.runId}/creative-direction`);
+      if (cr.ok) this.creativeDirection = await cr.json();
     },
 
     async suggestGenres() {
@@ -346,8 +498,47 @@ function wizard(runId, initialSteps, saved) {
           body: JSON.stringify({}),
         });
         const j = await r.json();
-        this.genres = j.directions || [];
+        // Accumulate: append new directions, dedup by style string
+        const existing = new Set(this.genres.map(g => g.style));
+        const fresh = (j.directions || []).filter(g => !existing.has(g.style));
+        this.genres = [...this.genres, ...fresh];
       } finally { this.busy.suggest = false; }
+    },
+
+    async refreshLore() {
+      this.busy.lore = true;
+      try {
+        const r = await fetch(`/api/runs/${this.runId}/lore-profile/refresh`, { method: 'POST' });
+        if (r.ok) this.loreProfile = await r.json();
+      } finally { this.busy.lore = false; }
+    },
+
+    async refreshCreativeDirection() {
+      if (!this.chosenGenre) { alert('Escolha um gênero primeiro.'); return; }
+      this.busy.direction = true;
+      try {
+        const r = await fetch(`/api/runs/${this.runId}/creative-direction/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ genre: this.chosenGenre, ref_index: this.chosenRefIndex }),
+        });
+        if (r.ok) this.creativeDirection = await r.json();
+      } finally { this.busy.direction = false; }
+    },
+
+    async addReference() {
+      const url = this.newReferenceUrl.trim();
+      if (!url) return;
+      const index = this.referenceUrls.length;
+      this.newReferenceUrl = '';
+      await this.runStep('reference', { url, index });
+    },
+
+    async removeReference(index) {
+      if (!confirm(`Remover referência ${index + 1}?\n\nContinuar?`)) return;
+      await fetch(`/api/runs/${this.runId}/references/${index}`, { method: 'DELETE' });
+      await this.loadOutputs();
+      await this.refreshState();
     },
 
     confirmRun(stepId, params, warning) {
@@ -356,25 +547,20 @@ function wizard(runId, initialSteps, saved) {
     },
 
     redoStep(step) {
-      // Re-run a completed step, forcing over the existing output. footage/reference
-      // need their URL back — reuse the one saved in project.json (seeded into state).
       let params = {};
       if (step.id === 'footage') params = { url: this.footageUrl };
-      else if (step.id === 'reference') params = { url: this.referenceUrl };
       if (!confirm('Isso vai refazer o passo e substituir a saída atual.\n\nContinuar?')) return;
       this.runStep(step.id, params, true);
     },
 
     generateLyrics(step) {
-      // The genre shapes the whole song, so re-generating with a new genre means
-      // re-running the lyrics step. Force it when lyrics already exist (confirm first).
       const regenerating = step.status === 'done';
       const msg = regenerating
         ? 'Isso vai SUBSTITUIR a letra atual por uma nova (chama a API Anthropic).'
         : 'Gerar letra chama a API Anthropic.';
       if (!confirm(msg + '\n\nContinuar?')) return;
       this.lyricsOutput = {};
-      this.runStep('lyrics', { genre: this.chosenGenre }, regenerating);
+      this.runStep('lyrics', { genre: this.chosenGenre, ref_index: this.chosenRefIndex }, regenerating);
     },
 
     async runStep(stepId, params, force) {

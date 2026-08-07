@@ -66,6 +66,8 @@ Put "aggressive rap vocals" / "spoken flow" / "confident rap flow" in style, AND
 genuinely want sung sections.
 """
 
+N_GENRE_SUGGESTIONS = 5
+
 _SUNO_LYRICS_RULES = """\
 LYRICS FIELD — STRUCTURE AND DELIVERY TAGS
 Suno obeys bracketed tags in the Lyrics field (structure tags most reliably).
@@ -253,7 +255,7 @@ OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
 }}
 
 Rules:
-- Exactly 3 directions, each clearly different from the others.
+- Exactly {N_GENRE_SUGGESTIONS} directions, each clearly different from the others.
 - Each style must follow the formula and BANNED-terms rule above.
 - All descriptors in English.
 """
@@ -262,8 +264,8 @@ SUGGEST_SYSTEM_PROMPT_NO_REF = SUGGEST_SYSTEM_PROMPT_BASE + f"""
 {_ARCHETYPE_RANGE_NO_REF}
 """
 
-SUGGEST_SYSTEM_PROMPT_WITH_REF = SUGGEST_SYSTEM_PROMPT_BASE + """
-GENRE FOLLOWS THE REFERENCE — when a reference is provided the 3 directions must be
+SUGGEST_SYSTEM_PROMPT_WITH_REF = SUGGEST_SYSTEM_PROMPT_BASE + f"""
+GENRE FOLLOWS THE REFERENCE — when a reference is provided the {N_GENRE_SUGGESTIONS} directions must be
 anchored to the reference's lane and BPM. They are VARIATIONS within that lane (e.g.
 harder vs. more melodic, sparser vs. more orchestral), not three unrelated genres.
 Infer subgenre, energy, beat character and vocal style from the reference's SONIC DNA
@@ -409,43 +411,55 @@ def suggest_mood(character: str, anime: str = "") -> str:
 
 
 def suggest_genres(project: VideoProject, **_ignored) -> GenreSuggestions:
-    """Return 3 genre directions for the project's character/topic.
+    """Return genre directions for the project's character/topic.
 
-    When a reference rap is present the genre always follows the reference's SONIC lane.
-    Extra keyword args (e.g. the deprecated ``content_blend``) are accepted and ignored
-    for signature compatibility — they no longer influence anything.
+    When multiple references exist, each one produces its own set of directions
+    (anchored to its sonic lane). All sets are returned together so the UI can
+    accumulate and let the user pick freely.
+
+    Extra keyword args are accepted and ignored for signature compatibility.
     """
     from cutforge.services import reference_service
 
     topic = project.topic or project.character
-    profile = reference_service.load_reference_profile(project)
+    all_profiles = reference_service.load_all_reference_profiles(project)
 
-    lines = [f"Character / matchup: {topic}", ""]
+    all_directions: list[GenreDirection] = []
+    character_read = ""
 
-    if profile:
-        system = SUGGEST_SYSTEM_PROMPT_WITH_REF
-        lines += [
-            "REFERENCE SONIC DNA (derive the genre/lane from this — sound only):",
-            f"- BPM: {profile.get('bpm')} — use this one number in every style string",
-            f"- Onset density: {profile.get('onset_rate_per_sec')} onsets/s",
-            f"- Title: {profile.get('source_title')}",
-            "",
-            "Propose 3 directions. All 3 must stay in the reference's lane and use its BPM. "
-            "Vary within the lane (e.g. harder vs. more melodic). Every direction must also "
-            "fit the character's personality.",
-        ]
+    if all_profiles:
+        for idx, profile in enumerate(all_profiles):
+            system = SUGGEST_SYSTEM_PROMPT_WITH_REF
+            lines = [f"Character / matchup: {topic}", ""]
+            lines += [
+                "REFERENCE SONIC DNA (derive the genre/lane from this — sound only):",
+                f"- BPM: {profile.get('bpm')} — use this one number in every style string",
+                f"- Onset density: {profile.get('onset_rate_per_sec')} onsets/s",
+                f"- Title: {profile.get('source_title')}",
+                "",
+                f"Propose {N_GENRE_SUGGESTIONS} directions. All {N_GENRE_SUGGESTIONS} must stay in the reference's lane and use its BPM. "
+                "Vary within the lane (e.g. harder vs. more melodic). Every direction must also "
+                "fit the character's personality.",
+                "Return only valid JSON.",
+            ]
+            data = anthropic_client.complete_json(system, "\n".join(lines))
+            if not character_read:
+                character_read = data.get("character_read", "")
+            for d in data.get("directions", []):
+                all_directions.append(GenreDirection(**d, ref_index=idx))
     else:
         system = SUGGEST_SYSTEM_PROMPT_NO_REF
-        lines.append(
-            "Propose 3 distinct genre/vibe directions for an original anime song about this."
-        )
+        lines = [
+            f"Character / matchup: {topic}", "",
+            f"Propose {N_GENRE_SUGGESTIONS} distinct genre/vibe directions for an original anime song about this.",
+            "Return only valid JSON.",
+        ]
+        data = anthropic_client.complete_json(system, "\n".join(lines))
+        character_read = data.get("character_read", "")
+        for d in data.get("directions", []):
+            all_directions.append(GenreDirection(**d, ref_index=0))
 
-    lines.append("Return only valid JSON.")
-    user_prompt = "\n".join(lines)
-
-    data = anthropic_client.complete_json(system, user_prompt)
-    directions = [GenreDirection(**d) for d in data.get("directions", [])]
-    return GenreSuggestions(character_read=data.get("character_read", ""), directions=directions)
+    return GenreSuggestions(character_read=character_read, directions=all_directions)
 
 
 def plan_creative_direction(
@@ -509,39 +523,37 @@ def plan_creative_direction(
 
 def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
                      reference_profile: dict | None = None,
+                     ref_index: int = 0,
                      refresh: bool = False,
                      refresh_lore: bool = False,
                      on_log=None,
                      **_ignored) -> SongPackage:
     """Generate the full Suno package and write lyrics.txt + suno_prompt.json.
 
-    Orchestrates the original-composition flow:
-      reference music profile + mined lore  →  creative direction  →  original writer.
-
-    The reference (when present) drives ONLY the sonic world; its lyrical expression is
-    never reused. ``refresh`` re-plans the creative direction (used on a forced
-    regenerate for a new angle); ``refresh_lore`` additionally re-mines the reference
-    lore. Extra keyword args (e.g. the deprecated ``content_blend``) are accepted and
-    ignored for signature compatibility.
+    ``ref_index`` selects which reference provides the sonic DNA (BPM/flow/style).
+    All available references contribute lore (merged and deduplicated).
+    ``refresh`` re-plans the creative direction; ``refresh_lore`` re-mines all lore.
     """
     from cutforge.services import lore_service, reference_service
 
     log = on_log or (lambda _m: None)
 
+    # Sonic DNA comes from the selected reference only.
     if reference_profile is None:
-        reference_profile = reference_service.load_reference_profile(project)
+        reference_profile = reference_service.load_reference_profile(project, index=ref_index)
 
-    # Mine the reference transcript into character KNOWLEDGE (cached). This is where the
-    # reference's lyrics contribute — as facts, never as expression. Lore is objective
-    # and stable, so it is NOT re-mined on a plain regenerate (avoids a wasted LLM call);
-    # pass ``refresh_lore=True`` explicitly to force re-mining.
+    # Mine ALL references for lore and merge.
+    all_ref_profiles = reference_service.load_all_reference_profiles(project)
     lore_profile = None
-    if reference_profile:
-        lore_profile = lore_service.mine_reference_lore(
-            project, refresh=refresh_lore, on_log=log)
+    if all_ref_profiles:
+        individual_lores = []
+        for idx in range(len(all_ref_profiles)):
+            lp = lore_service.mine_reference_lore(project, index=idx,
+                                                  refresh=refresh_lore, on_log=log)
+            if lp:
+                individual_lores.append(lp)
+        lore_profile = lore_service.merge_lore_profiles(individual_lores)
 
-    # Plan the original-song brief before writing a single line (cached; a forced
-    # regenerate refreshes it so the new lyrics get a genuinely new angle).
     direction = plan_creative_direction(
         project, genre,
         music_profile=reference_profile, lore_profile=lore_profile,

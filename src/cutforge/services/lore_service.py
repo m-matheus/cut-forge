@@ -91,52 +91,132 @@ def _build_user_prompt(project: VideoProject, transcript: str, source_title: str
     return "\n".join(lines)
 
 
-def mine_reference_lore(project: VideoProject, *, refresh: bool = False,
+def mine_reference_lore(project: VideoProject, index: int = 0, *, refresh: bool = False,
                         on_log=None) -> ReferenceLoreProfile | None:
     """Mine the reference transcript into a ReferenceLoreProfile (cached to disk).
 
+    ``index`` selects which reference to mine (0 = primary).
     Returns ``None`` when there is no reference to mine. The result is persisted to
-    ``project.reference_lore_profile_path`` and reused on subsequent calls unless
-    ``refresh=True`` — the LLM extraction is only run once per run.
+    ``project.ref_lore_profile_path(index)`` and reused on subsequent calls unless
+    ``refresh=True``.
     """
     log = on_log or (lambda _m: None)
 
-    music_profile = reference_service.load_reference_profile(project)
+    music_profile = reference_service.load_reference_profile(project, index=index)
     if not music_profile:
         return None
 
-    # Cache hit — mined once, reused.
-    if project.reference_lore_profile_path.exists() and not refresh:
-        data = json.loads(project.reference_lore_profile_path.read_text(encoding="utf-8"))
+    lore_path = project.ref_lore_profile_path(index)
+    # Legacy flat path fallback for index 0.
+    if index == 0 and not lore_path.parent.exists():
+        lore_path = project.reference_lore_profile_path
+
+    if lore_path.exists() and not refresh:
+        data = json.loads(lore_path.read_text(encoding="utf-8"))
         return ReferenceLoreProfile(**data)
 
     transcript = (music_profile.get("transcript") or "").strip()
     if not transcript:
-        log("No reference transcript to mine — skipping lore mining.")
+        log(f"No transcript for reference {index} — skipping lore mining.")
         return None
 
     source_title = music_profile.get("source_title", "")
     user_prompt = _build_user_prompt(project, transcript, source_title)
 
-    log("Mining reference transcript for character lore…")
+    log(f"Mining reference {index} transcript for character lore…")
     data = anthropic_client.complete_json(LORE_MINER_SYSTEM_PROMPT, user_prompt)
     data.setdefault("source_title", source_title)
     profile = ReferenceLoreProfile(**data)
 
-    project.reference_lore_profile_path.parent.mkdir(parents=True, exist_ok=True)
-    project.reference_lore_profile_path.write_text(
-        profile.model_dump_json(indent=2), encoding="utf-8"
-    )
+    lore_path.parent.mkdir(parents=True, exist_ok=True)
+    lore_path.write_text(profile.model_dump_json(indent=2), encoding="utf-8")
     log(
-        f"Lore mined: {len(profile.facts)} facts, {len(profile.abilities)} abilities, "
+        f"Lore {index} mined: {len(profile.facts)} facts, {len(profile.abilities)} abilities, "
         f"{len(profile.easter_eggs)} easter eggs."
     )
     return profile
 
 
-def load_reference_lore_profile(project: VideoProject) -> ReferenceLoreProfile | None:
-    """Return the cached lore profile, or None if this run has none yet."""
-    if not project.reference_lore_profile_path.exists():
+def load_reference_lore_profile(project: VideoProject, index: int = 0) -> ReferenceLoreProfile | None:
+    """Return the cached lore profile for one reference, or None if not yet mined."""
+    lore_path = project.ref_lore_profile_path(index)
+    if lore_path.exists():
+        return ReferenceLoreProfile(**json.loads(lore_path.read_text(encoding="utf-8")))
+    # Legacy flat layout fallback.
+    if index == 0 and project.reference_lore_profile_path.exists():
+        return ReferenceLoreProfile(
+            **json.loads(project.reference_lore_profile_path.read_text(encoding="utf-8"))
+        )
+    return None
+
+
+def load_all_lore_profiles(project: VideoProject) -> list[ReferenceLoreProfile]:
+    """Return all mined lore profiles for this run, in index order."""
+    profiles = []
+    for i in range(max(len(project.reference_urls), 1)):
+        p = load_reference_lore_profile(project, index=i)
+        if p is not None:
+            profiles.append(p)
+    return profiles
+
+
+def merge_lore_profiles(profiles: list[ReferenceLoreProfile]) -> ReferenceLoreProfile | None:
+    """Merge multiple lore profiles into one, deduplicating by normalized text."""
+    if not profiles:
         return None
-    data = json.loads(project.reference_lore_profile_path.read_text(encoding="utf-8"))
-    return ReferenceLoreProfile(**data)
+    if len(profiles) == 1:
+        return profiles[0]
+
+    def _norm(s: str) -> str:
+        return s.strip().lower()
+
+    seen_facts: set[str] = set()
+    seen_events: set[str] = set()
+    seen_abilities: set[str] = set()
+    seen_eggs: set[str] = set()
+
+    merged_facts, merged_events, merged_abilities, merged_rels = [], [], [], []
+    merged_themes: set[str] = set()
+    merged_traits: set[str] = set()
+    merged_eggs, merged_interps, merged_uncertain = [], [], []
+
+    for p in profiles:
+        for f in p.facts:
+            key = _norm(f.fact)
+            if key not in seen_facts:
+                seen_facts.add(key)
+                merged_facts.append(f)
+        for e in p.events:
+            key = _norm(e.event)
+            if key not in seen_events:
+                seen_events.add(key)
+                merged_events.append(e)
+        for a in p.abilities:
+            key = _norm(a.name)
+            if key not in seen_abilities:
+                seen_abilities.add(key)
+                merged_abilities.append(a)
+        merged_rels.extend(p.relationships)
+        merged_themes.update(t.strip() for t in p.themes)
+        merged_traits.update(t.strip() for t in p.personality_traits)
+        for eg in p.easter_eggs:
+            key = _norm(eg.reference)
+            if key not in seen_eggs:
+                seen_eggs.add(key)
+                merged_eggs.append(eg)
+        merged_interps.extend(p.author_interpretations)
+        merged_uncertain.extend(p.uncertain_items)
+
+    return ReferenceLoreProfile(
+        character=profiles[0].character,
+        facts=merged_facts,
+        events=merged_events,
+        abilities=merged_abilities,
+        relationships=merged_rels,
+        themes=sorted(merged_themes),
+        personality_traits=sorted(merged_traits),
+        easter_eggs=merged_eggs,
+        author_interpretations=merged_interps,
+        uncertain_items=merged_uncertain,
+        source_title=" + ".join(p.source_title for p in profiles if p.source_title),
+    )
