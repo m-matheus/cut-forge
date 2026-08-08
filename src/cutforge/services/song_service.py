@@ -27,6 +27,7 @@ from cutforge.models.song import (
     GenreSuggestions,
     SongPackage,
 )
+from cutforge.models.story import StoryContentProfile
 from cutforge.models.structure import NarrativeStructureProfile
 
 
@@ -181,6 +182,30 @@ recognise the STRUCTURE but hear nothing lifted — every line is your own.
 """
 
 
+_REWRITE_RULES = """\
+REWRITE THE STORY — SAME STORY, NEW EXPRESSION
+This song deliberately RE-TELLS a story reverse-engineered from reference songs about
+this character (the STORY TO RETELL block below). The user sent 2–3 raps that tell the
+SAME story with different rhymes and rhythms, and wants a NEW rap that keeps that story
+and its ideas but is written fresh. You are doing exactly that: same story, new words.
+
+DO:
+- preserve the logline, the ORDER of the story points, and the key ideas and imagery;
+- keep the same narrative meaning at each point — say the SAME thing, differently;
+- re-write EVERY line with NEW rhymes, a different rhythm/cadence and your own phrasing;
+- honour the hook instruction below (keep the reference's hook CONCEPT, or invent a new one).
+
+DO NOT:
+- copy, quote, translate or lightly paraphrase any line, rhyme, punchline or hook WORDING
+  from the reference — you never saw its lyrics, only a neutral description of its story;
+- mirror the reference line-by-line or preserve its rhyme scheme;
+- change WHAT the story says — only HOW it is said.
+
+The test: a listener who knows the references should recognise the SAME story and ideas,
+but hear NOTHING lifted — every line, rhyme and cadence is your own re-writing.
+"""
+
+
 
 # ---------------------------------------------------------------------------
 # Lore + creative-direction prompt formatting
@@ -285,6 +310,49 @@ def _format_structure_for_prompt(structure: NarrativeStructureProfile) -> str:
     return "\n".join(parts)
 
 
+def _format_story_for_prompt(story: StoryContentProfile, *, new_hook: bool) -> str:
+    """Render the shared story as a writer-facing block — CONTENT to preserve, no phrasing.
+
+    ``new_hook`` controls the hook instruction: ``False`` keeps the reference's hook
+    CONCEPT (rewording only), ``True`` asks for a brand-new hook.
+    """
+    parts = [
+        "STORY TO RETELL (the SAME story to preserve — this is CONTENT, not lyrics. Keep "
+        "WHAT is said and its order; re-write HOW it is said with new rhymes and rhythm).",
+    ]
+    if story.logline:
+        parts.append(f"- Logline (the whole story to keep): {story.logline}")
+    if story.key_ideas:
+        parts.append("- Key ideas to preserve: " + "; ".join(story.key_ideas))
+    if story.themes:
+        parts.append(f"- Themes: {', '.join(story.themes)}")
+    if story.story_points:
+        parts.append("- Story points (keep this order and meaning; re-write the wording):")
+        for p in sorted(story.story_points, key=lambda x: x.order):
+            imgs = f" — keep imagery: {', '.join(p.key_images)}" if p.key_images else ""
+            parts.append(f"    {p.order}. [{p.section} · {p.function}] {p.point}{imgs}")
+    if story.emotional_arc:
+        parts.append(f"- Emotional arc: {story.emotional_arc}")
+    if story.shared_pattern_notes:
+        parts.append(f"- Shared-story notes: {story.shared_pattern_notes}")
+    if new_hook:
+        parts.append(
+            "- HOOK: invent a BRAND-NEW hook/refrain concept and wording. Do NOT reuse the "
+            "reference's hook idea."
+        )
+    elif story.hook_concept:
+        parts.append(
+            f"- HOOK: keep the reference's hook CONCEPT ({story.hook_concept}) but re-write "
+            "its wording — same idea, new words and rhyme."
+        )
+    else:
+        parts.append(
+            "- HOOK: keep the reference's hook concept, but re-write its wording — same "
+            "idea, new words and rhyme."
+        )
+    return "\n".join(parts)
+
+
 # ---------------------------------------------------------------------------
 # System prompts
 # ---------------------------------------------------------------------------
@@ -364,6 +432,47 @@ OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
 Return ONLY the JSON object.
 """
 
+# Rewrite-the-story planner — the EXPRESSION-only brief-writer. Unlike the default
+# planner (which forbids preserving the reference's story), this one treats the story as
+# FIXED and designs only how to re-express it: new metaphors, rhyme/cadence approach,
+# delivery, and the hook decision.
+CREATIVE_DIRECTION_REWRITE_SYSTEM_PROMPT = """\
+You are a creative director for an anime-rap channel (BASARA / M4RKIM / Rustage lane).
+The channel has 2–3 reference raps that tell the SAME story about a character, and wants
+a NEW rap that KEEPS that story and its ideas but is re-written with different rhymes, a
+different rhythm and (optionally) a different hook.
+
+You answer ONE question: "How do we RE-EXPRESS this fixed story?".
+The STORY, its points, its ideas and its emotional arc are GIVEN and FIXED (in the STORY
+block below) — you do NOT invent a new story or change what it says. You design only the
+EXPRESSION layer used to re-write it.
+
+Inputs you may receive:
+- the character / anime and the user's topic;
+- a reference MUSIC profile (BPM/energy) — sonic direction only;
+- the SHARED STORY to retell (logline, story points, ideas, arc, hook concept);
+- mined CHARACTER LORE — extra knowledge to draw richer wording from.
+
+Design the re-expression: keep the given core theme and narrative (do not replace them),
+then choose a FRESH metaphor world, a rhyme/cadence approach that differs from the
+references, the delivery personality, and the hook decision (respect whether a new hook
+was requested). In "things_to_avoid", explicitly include lifting or lightly paraphrasing
+the reference's wording, rhymes or hook, and any clichés.
+
+OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
+{
+  "core_theme": "the story's central idea (kept from the STORY block, in one line)",
+  "narrative_angle": "the story's POV/approach (kept — how it is TOLD, re-expressed)",
+  "emotional_arc": "the arc from the STORY block (kept; may be phrased in your words)",
+  "hook_concept": "the hook idea to use — kept-but-reworded, or brand-new if requested",
+  "key_lore_points": ["specific facts/ideas to weave in while retelling", "..."],
+  "original_metaphor_direction": "a FRESH metaphor world to re-write lines from",
+  "delivery_personality": "the rap persona/attitude and cadence feel",
+  "things_to_avoid": ["reference's exact wording/rhymes/hook", "line-by-line mirroring", "generic clichés", "..."]
+}
+Return ONLY the JSON object.
+"""
+
 GENERATE_INTRO_ORIGINAL = """\
 You are writing a completely original song. When a reference exists, it gives you ONLY
 the sonic world (genre/BPM/energy) and a list of extracted character facts — you never
@@ -375,6 +484,14 @@ extracted from reference songs about this character. The reference gives you thr
 the sonic world (genre/BPM/energy), a list of extracted character facts, and the STORY
 STRUCTURE to follow. You write EVERY word yourself — you never saw the reference's lyrics
 and you never reproduce its expression; you follow only its SHAPE."""
+
+GENERATE_INTRO_REWRITE = """\
+You are RE-WRITING a rap that already exists. Reference songs told a story about this
+character; you keep that STORY and its ideas but re-write the expression. The reference
+gives you three things: the sonic world (genre/BPM/energy), a list of extracted character
+facts, and the STORY to retell. You preserve WHAT the story says and its order, but you
+write EVERY line, rhyme and cadence yourself — you never saw the reference's lyrics (only
+a neutral description of its story) and you never lift its wording. Same story, new words."""
 
 
 def _build_generate_base(rules_block: str, *, intro: str) -> str:
@@ -468,6 +585,18 @@ GENERATE_SYSTEM_PROMPT_WITH_REF = GENERATE_SYSTEM_PROMPT_BASE + f"""
 # Follow-structure mode always needs a reference (there is no skeleton without one), so
 # there is only a WITH_REF variant.
 GENERATE_SYSTEM_PROMPT_STRUCTURE_WITH_REF = GENERATE_SYSTEM_PROMPT_STRUCTURE_BASE + f"""
+{_REFERENCE_SONIC_RULES}
+"""
+
+# Rewrite-the-story mode base — same Suno craft, but the originality block is replaced by
+# the rewrite rules and the intro reframed around re-telling the reference's story.
+GENERATE_SYSTEM_PROMPT_REWRITE_BASE = _build_generate_base(
+    _REWRITE_RULES, intro=GENERATE_INTRO_REWRITE
+)
+
+# Rewrite mode always needs a reference (there is no story to retell without one), so
+# there is only a WITH_REF variant.
+GENERATE_SYSTEM_PROMPT_REWRITE_WITH_REF = GENERATE_SYSTEM_PROMPT_REWRITE_BASE + f"""
 {_REFERENCE_SONIC_RULES}
 """
 
@@ -591,6 +720,8 @@ def plan_creative_direction(
     music_profile: dict | None = None,
     lore_profile: ReferenceLoreProfile | None = None,
     structure_profile: NarrativeStructureProfile | None = None,
+    story_profile: StoryContentProfile | None = None,
+    new_hook: bool = True,
     is_vs: bool = False,
     user_instruction: str = "",
     refresh: bool = False,
@@ -606,10 +737,18 @@ def plan_creative_direction(
     ``structure_profile`` (follow-structure mode) is fed as a FIXED-shape constraint: the
     arc/arrangement/hook placement come from the proven skeleton, so the brief designs
     fresh CONTENT within that shape instead of fighting it.
+
+    ``story_profile`` (rewrite-the-story mode) flips the planner: the story/points/ideas/
+    arc are FIXED and a rewrite-specific system prompt designs only the EXPRESSION layer
+    (metaphor world, rhyme/cadence, delivery, hook decision). ``new_hook`` decides whether
+    the hook is kept-but-reworded or invented fresh. When ``story_profile`` is given it
+    takes precedence over ``structure_profile``.
     """
     if project.creative_direction_path.exists() and not refresh:
         data = json.loads(project.creative_direction_path.read_text(encoding="utf-8"))
         return CreativeDirection(**data)
+
+    rewrite = story_profile is not None and not story_profile.is_empty()
 
     topic = project.topic or project.character
     lines = []
@@ -639,24 +778,39 @@ def plan_creative_direction(
     if lore_profile and not lore_profile.is_empty():
         lines += ["", _format_lore_for_prompt(lore_profile)]
 
-    if structure_profile and not structure_profile.is_empty():
+    if rewrite:
         lines += [
             "",
-            _format_structure_for_prompt(structure_profile),
+            _format_story_for_prompt(story_profile, new_hook=new_hook),
             "",
-            "IMPORTANT: the emotional arc, section arrangement and hook placement are "
-            "FIXED by this proven skeleton. Design a fresh core theme, narrative angle, "
-            "metaphor world and hook CONCEPT that live WITHIN this shape — do not fight "
-            "the structure. Your emotional_arc must be compatible with the skeleton's.",
+            "IMPORTANT: the story, its points, ideas and emotional arc above are FIXED — do "
+            "NOT invent a new story or change what it says. Design only the EXPRESSION used "
+            "to re-write it (a fresh metaphor world, a rhyme/cadence approach that differs "
+            "from the references, delivery, and the hook decision).",
+            "",
+            "Design the brief to RE-EXPRESS this story. Return only valid JSON.",
         ]
+        system_prompt = CREATIVE_DIRECTION_REWRITE_SYSTEM_PROMPT
+    else:
+        if structure_profile and not structure_profile.is_empty():
+            lines += [
+                "",
+                _format_structure_for_prompt(structure_profile),
+                "",
+                "IMPORTANT: the emotional arc, section arrangement and hook placement are "
+                "FIXED by this proven skeleton. Design a fresh core theme, narrative angle, "
+                "metaphor world and hook CONCEPT that live WITHIN this shape — do not fight "
+                "the structure. Your emotional_arc must be compatible with the skeleton's.",
+            ]
+        lines += [
+            "",
+            "Design the brief for a NEW original song. Return only valid JSON.",
+        ]
+        system_prompt = CREATIVE_DIRECTION_SYSTEM_PROMPT
 
-    lines += [
-        "",
-        "Design the brief for a NEW original song. Return only valid JSON.",
-    ]
     user_prompt = "\n".join(lines)
 
-    data = anthropic_client.complete_json(CREATIVE_DIRECTION_SYSTEM_PROMPT, user_prompt)
+    data = anthropic_client.complete_json(system_prompt, user_prompt)
     direction = CreativeDirection(**data)
 
     project.run_dir.mkdir(parents=True, exist_ok=True)
@@ -669,7 +823,9 @@ def plan_creative_direction(
 def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
                      reference_profile: dict | None = None,
                      ref_index: int = 0,
+                     mode: str = "original",
                      follow_structure: bool = False,
+                     new_hook: bool = True,
                      user_instruction: str = "",
                      refresh: bool = False,
                      refresh_lore: bool = False,
@@ -680,16 +836,36 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
 
     ``ref_index`` selects which reference provides the sonic DNA (BPM/flow/style).
     All available references contribute lore (merged and deduplicated).
-    ``follow_structure`` switches to "follow structure" mode: the song follows the proven
-    narrative skeleton synthesized from the reference(s) while keeping 100% original
-    wording. It needs at least one reference; with none it falls back to the normal path.
+
+    ``mode`` selects the lyrics-generation mode:
+    - ``"original"`` (default): a 100% original composition (only sonic DNA + lore reach
+      the writer);
+    - ``"structure"``: follows the proven narrative skeleton across the reference(s) while
+      keeping 100% original wording;
+    - ``"rewrite"``: re-tells the SAME story extracted from the reference(s) with new
+      rhymes/rhythm/phrasing. ``new_hook`` decides whether the hook is kept-but-reworded
+      (``False``) or invented fresh (``True``).
+    Both ``"structure"`` and ``"rewrite"`` need at least one reference; with none, or with
+    no usable profile, they fall back to ``"original"``.
+
+    ``follow_structure`` is the legacy boolean — when ``True`` and ``mode`` was left at the
+    default, it is treated as ``mode="structure"`` for backward compatibility.
+
     ``refresh`` re-plans the creative direction; ``refresh_lore`` re-mines all lore;
-    ``refresh_structure`` re-extracts the narrative structure.
+    ``refresh_structure`` re-extracts the narrative structure / shared story.
     ``user_instruction`` optionally steers the creative-direction re-plan.
     """
-    from cutforge.services import lore_service, reference_service, structure_service
+    from cutforge.services import (
+        lore_service, reference_service, story_service, structure_service,
+    )
 
     log = on_log or (lambda _m: None)
+
+    # Legacy compat: the old boolean maps to the "structure" mode when no explicit mode.
+    if follow_structure and mode == "original":
+        mode = "structure"
+    if mode not in ("original", "structure", "rewrite"):
+        mode = "original"
 
     # Sonic DNA comes from the selected reference only.
     if reference_profile is None:
@@ -709,7 +885,7 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
 
     # Follow-structure mode: synthesize the shared skeleton across all references.
     structure_profile = None
-    if follow_structure:
+    if mode == "structure":
         if all_ref_profiles:
             structure_profile = structure_service.extract_structure_profile(
                 project, refresh=refresh_structure, on_log=log)
@@ -717,11 +893,25 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
             log("Follow-structure requested but no usable reference skeleton — "
                 "falling back to max-originality mode.")
             structure_profile = None
+            mode = "original"
+
+    # Rewrite-the-story mode: synthesize the shared story across all references.
+    story_profile = None
+    if mode == "rewrite":
+        if all_ref_profiles:
+            story_profile = story_service.extract_story_profile(
+                project, refresh=refresh_structure, on_log=log)
+        if not (story_profile and not story_profile.is_empty()):
+            log("Rewrite-the-story requested but no usable reference story — "
+                "falling back to max-originality mode.")
+            story_profile = None
+            mode = "original"
 
     direction = plan_creative_direction(
         project, genre,
         music_profile=reference_profile, lore_profile=lore_profile,
         structure_profile=structure_profile,
+        story_profile=story_profile, new_hook=new_hook,
         is_vs=is_vs, user_instruction=user_instruction, refresh=refresh,
     )
 
@@ -742,12 +932,15 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
     lines += ["", _format_direction_for_prompt(direction)]
 
     use_structure = structure_profile is not None  # already validated non-empty above
+    use_rewrite = story_profile is not None         # already validated non-empty above
 
     if reference_profile:
-        system_prompt = (
-            GENERATE_SYSTEM_PROMPT_STRUCTURE_WITH_REF if use_structure
-            else GENERATE_SYSTEM_PROMPT_WITH_REF
-        )
+        if use_rewrite:
+            system_prompt = GENERATE_SYSTEM_PROMPT_REWRITE_WITH_REF
+        elif use_structure:
+            system_prompt = GENERATE_SYSTEM_PROMPT_STRUCTURE_WITH_REF
+        else:
+            system_prompt = GENERATE_SYSTEM_PROMPT_WITH_REF
         flow = reference_profile.get("flow", {})
         lines += [
             "",
@@ -766,10 +959,20 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
             lines += ["", _format_lore_for_prompt(lore_profile)]
         if use_structure:
             lines += ["", _format_structure_for_prompt(structure_profile)]
+        elif use_rewrite:
+            lines += ["", _format_story_for_prompt(story_profile, new_hook=new_hook)]
     else:
         system_prompt = GENERATE_SYSTEM_PROMPT_NO_REF
 
-    if use_structure:
+    if use_rewrite:
+        lines += [
+            "",
+            "Write the complete Suno package: RE-TELL the story above — keep WHAT it says "
+            "and its order, but write EVERY line, rhyme and cadence yourself with new "
+            "phrasing (never lift the reference's wording). Handle the hook as instructed. "
+            "Return only valid JSON.",
+        ]
+    elif use_structure:
         lines += [
             "",
             "Write the complete Suno package: FOLLOW the narrative structure above, but "

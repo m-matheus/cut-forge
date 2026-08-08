@@ -242,6 +242,28 @@ def create_app() -> FastAPI:
             return JSONResponse({"error": "no reference to analyze"}, status_code=404)
         return profile.model_dump()
 
+    # ---- Shared story (the story to retell — "rewrite the story" mode) ----
+    @app.get("/api/runs/{run_id}/story-profile")
+    def get_story_profile(run_id: str):
+        project = VideoProject.load(run_id)
+        from cutforge.services import story_service
+        profile = story_service.load_story_profile(project)
+        if not profile:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return profile.model_dump()
+
+    @app.post("/api/runs/{run_id}/story-profile/refresh")
+    def refresh_story_profile(run_id: str, payload: dict | None = None):
+        data = payload or {}
+        instruction = (data.get("instruction") or "").strip()
+        project = VideoProject.load(run_id)
+        from cutforge.services import story_service
+        profile = story_service.extract_story_profile(
+            project, refresh=True, user_instruction=instruction)
+        if not profile:
+            return JSONResponse({"error": "no reference to analyze"}, status_code=404)
+        return profile.model_dump()
+
     # ---- Creative direction (original-song brief) ----
     @app.get("/api/runs/{run_id}/creative-direction")
     def get_creative_direction(run_id: str):

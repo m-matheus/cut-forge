@@ -185,6 +185,12 @@ class VideoProject(BaseModel):
         # mode only. One blueprint per run (not per-reference).
         return self.run_dir / "narrative_structure.json"
 
+    @property
+    def story_content_path(self) -> Path:
+        # The shared STORY synthesized from the reference(s) — "rewrite the story" mode
+        # only. One profile per run (not per-reference), like narrative_structure.
+        return self.run_dir / "story_content.json"
+
     # --- Persistence ---
     def save(self) -> None:
         self.run_dir.mkdir(parents=True, exist_ok=True)

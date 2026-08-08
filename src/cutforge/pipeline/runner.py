@@ -71,7 +71,9 @@ def _execute(step_id: str, project: VideoProject, params: dict, log: LogFn):
         pkg = song_service.generate_package(
             project, genre, is_vs=params.get("is_vs", False),
             ref_index=int(params.get("ref_index", 0)),
+            mode=params.get("mode", "original"),
             follow_structure=params.get("follow_structure", False),
+            new_hook=params.get("new_hook", True),
             refresh=params.get("refresh", False), on_log=log)
         log(f"Song: {pkg.title}")
         return {"title": pkg.title, "style": pkg.style}

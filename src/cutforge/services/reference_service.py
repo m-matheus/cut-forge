@@ -199,6 +199,8 @@ def set_reference_lyrics(project: VideoProject, index: int, lyrics: str,
         lore_path.unlink()
     if project.narrative_structure_path.exists():
         project.narrative_structure_path.unlink()
+    if project.story_content_path.exists():
+        project.story_content_path.unlink()
 
     log(f"Reference {index} lyrics updated: {word_count} words. Lore/structure caches cleared.")
     return profile
@@ -223,3 +225,5 @@ def remove_reference(project: VideoProject, index: int) -> None:
     # The narrative structure is a cross-reference synthesis — stale once refs change.
     if project.narrative_structure_path.exists():
         project.narrative_structure_path.unlink()
+    if project.story_content_path.exists():
+        project.story_content_path.unlink()

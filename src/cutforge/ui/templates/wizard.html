@@ -155,16 +155,48 @@
                     <p class="ok"><small>✓ Usando o rap de referência: o gênero, o BPM e o flow seguem a referência; a letra é uma composição 100% original (o lore do personagem é extraído da referência, mas a expressão é nova).</small></p>
                   </template>
 
-                  <!-- Follow-structure toggle (only meaningful with a reference) -->
+                  <!-- Lyrics mode selector (only meaningful with a reference) -->
                   <template x-if="hasReference">
-                    <label class="genre-opt" style="display:flex;align-items:flex-start;gap:.5rem;cursor:pointer">
-                      <input type="checkbox" x-model="followStructure" style="margin-top:.2rem"
-                             @change="if (followStructure && !structureProfile) refreshStructure()">
-                      <span>
-                        <strong>Seguir a estrutura das referências</strong>
-                        <small class="muted" style="display:block">Reaproveita a fórmula comprovada (ordem dos beats, posição do gancho, arco) das músicas de referência — a letra continua 100% nova.</small>
-                      </span>
-                    </label>
+                    <div class="genres" style="margin-bottom:.6rem">
+                      <strong style="display:block;margin-bottom:.35rem">Modo de geração da letra</strong>
+                      <label class="genre-opt" :class="lyricsMode==='original' ? 'genre-opt-selected' : ''"
+                             style="display:flex;align-items:flex-start;gap:.5rem;cursor:pointer">
+                        <input type="radio" name="lyricsMode" value="original" x-model="lyricsMode" style="margin-top:.2rem">
+                        <span>
+                          <strong>Máxima originalidade</strong>
+                          <small class="muted" style="display:block">Composição 100% original — só o DNA sônico e o lore do personagem vêm da referência.</small>
+                        </span>
+                      </label>
+                      <label class="genre-opt" :class="lyricsMode==='structure' ? 'genre-opt-selected' : ''"
+                             style="display:flex;align-items:flex-start;gap:.5rem;cursor:pointer"
+                             @click="if (lyricsMode!=='structure' && !structureProfile) refreshStructure()">
+                        <input type="radio" name="lyricsMode" value="structure" x-model="lyricsMode" style="margin-top:.2rem">
+                        <span>
+                          <strong>Seguir a estrutura</strong>
+                          <small class="muted" style="display:block">Reaproveita a fórmula comprovada (ordem dos beats, gancho, arco); a letra continua 100% nova.</small>
+                        </span>
+                      </label>
+                      <label class="genre-opt" :class="lyricsMode==='rewrite' ? 'genre-opt-selected' : ''"
+                             style="display:flex;align-items:flex-start;gap:.5rem;cursor:pointer"
+                             @click="if (lyricsMode!=='rewrite' && !storyProfile) refreshStory()">
+                        <input type="radio" name="lyricsMode" value="rewrite" x-model="lyricsMode" style="margin-top:.2rem">
+                        <span>
+                          <strong>Reescrever a história</strong>
+                          <small class="muted" style="display:block">Mantém a MESMA história e ideias das referências, mas reescreve com rimas, ritmo e (opcional) bordão diferentes.</small>
+                        </span>
+                      </label>
+
+                      <!-- Hook toggle (rewrite mode only) -->
+                      <template x-if="lyricsMode==='rewrite'">
+                        <label class="genre-opt" style="display:flex;align-items:flex-start;gap:.5rem;cursor:pointer;margin-top:.4rem">
+                          <input type="checkbox" x-model="newHook" style="margin-top:.2rem">
+                          <span>
+                            <strong x-text="newHook ? 'Criar um bordão novo' : 'Manter o bordão da referência'"></strong>
+                            <small class="muted" style="display:block" x-text="newHook ? 'Inventa um gancho/refrão totalmente novo.' : 'Mantém o CONCEITO do bordão da referência, reescrevendo só o fraseado.'"></small>
+                          </span>
+                        </label>
+                      </template>
+                    </div>
                   </template>
 
                   <button class="secondary outline" @click="suggestGenres()"
@@ -196,7 +228,7 @@
                   <input placeholder="…ou cole um estilo Suno" x-model="chosenGenre">
 
                   <!-- Narrative structure panel (follow-structure mode) -->
-                  <template x-if="followStructure && structureProfile">
+                  <template x-if="lyricsMode==='structure' && structureProfile">
                     <details class="output-preview" open>
                       <summary>Estrutura narrativa (esqueleto comprovado)</summary>
                       <div class="output-block" style="font-size:.8rem">
@@ -235,6 +267,51 @@
                         </template>
                         <template x-if="structureProfile.shared_pattern_notes">
                           <p class="muted"><strong>Fórmula comum:</strong> <span x-text="structureProfile.shared_pattern_notes"></span></p>
+                        </template>
+                      </div>
+                    </details>
+                  </template>
+
+                  <!-- Story panel (rewrite-the-story mode) -->
+                  <template x-if="lyricsMode==='rewrite' && storyProfile">
+                    <details class="output-preview" open>
+                      <summary>História a reescrever (mesma história, palavras novas)</summary>
+                      <div class="output-block" style="font-size:.8rem">
+                        <div style="margin-bottom:.6rem">
+                          <textarea rows="2" x-model="storyInstruction" style="width:100%;font-size:.8rem"
+                                    placeholder="Instrução opcional p/ regenerar a história (ex: 'enfatize o arco de traição', 'mantenha os detalhes da origem')"></textarea>
+                          <button class="secondary outline copy-btn" style="margin-top:.35rem"
+                                  @click="refreshStory()" :aria-busy="busy.story" :disabled="busy.story">
+                            Regenerar história
+                          </button>
+                        </div>
+                        <template x-if="storyProfile.logline">
+                          <p><strong>Resumo:</strong> <span x-text="storyProfile.logline"></span></p>
+                        </template>
+                        <template x-if="storyProfile.key_ideas && storyProfile.key_ideas.length">
+                          <p><strong>Ideias-chave:</strong> <span x-text="storyProfile.key_ideas.join('; ')"></span></p>
+                        </template>
+                        <template x-if="storyProfile.themes && storyProfile.themes.length">
+                          <p><strong>Temas:</strong> <span x-text="storyProfile.themes.join(', ')"></span></p>
+                        </template>
+                        <template x-if="storyProfile.story_points && storyProfile.story_points.length">
+                          <div>
+                            <strong>Pontos da história (ordem a preservar)</strong>
+                            <ol style="margin:.25rem 0 .5rem 1rem">
+                              <template x-for="p in storyProfile.story_points" :key="p.order">
+                                <li><span x-text="`[${p.section} · ${p.function}] ${p.point}` + (p.key_images && p.key_images.length ? ` — imagens: ${p.key_images.join(', ')}` : '')"></span></li>
+                              </template>
+                            </ol>
+                          </div>
+                        </template>
+                        <template x-if="storyProfile.hook_concept">
+                          <p><strong>Conceito do gancho:</strong> <span x-text="storyProfile.hook_concept"></span></p>
+                        </template>
+                        <template x-if="storyProfile.emotional_arc">
+                          <p><strong>Arco emocional:</strong> <span x-text="storyProfile.emotional_arc"></span></p>
+                        </template>
+                        <template x-if="storyProfile.shared_pattern_notes">
+                          <p class="muted"><strong>História comum:</strong> <span x-text="storyProfile.shared_pattern_notes"></span></p>
                         </template>
                       </div>
                     </details>
@@ -524,17 +601,20 @@ function wizard(runId, initialSteps, saved) {
     running: false,
     current: null,
     openStep: null,
-    busy: { suggest: false, lore: false, direction: false, structure: false, refLyrics: null, refSubs: null, newSubs: false },
+    busy: { suggest: false, lore: false, direction: false, structure: false, story: false, refLyrics: null, refSubs: null, newSubs: false },
     genres: [],
     chosenGenre: '',
     chosenRefIndex: 0,
     loreProfile: null,
     creativeDirection: null,
     structureProfile: null,
+    storyProfile: null,
     loreInstruction: '',
     directionInstruction: '',
     structureInstruction: '',
-    followStructure: false,
+    storyInstruction: '',
+    lyricsMode: 'original',
+    newHook: true,
     footageUrl: saved.footageUrl || '',
     referenceUrls: saved.referenceUrls || [],
     projectLanguage: saved.language || 'en',
@@ -633,7 +713,9 @@ function wizard(runId, initialSteps, saved) {
       const cr = await fetch(`/api/runs/${this.runId}/creative-direction`);
       if (cr.ok) this.creativeDirection = await cr.json();
       const sr = await fetch(`/api/runs/${this.runId}/structure-profile`);
-      if (sr.ok) { this.structureProfile = await sr.json(); this.followStructure = true; }
+      if (sr.ok) { this.structureProfile = await sr.json(); this.lyricsMode = 'structure'; }
+      const str = await fetch(`/api/runs/${this.runId}/story-profile`);
+      if (str.ok) { this.storyProfile = await str.json(); this.lyricsMode = 'rewrite'; }
     },
 
     async suggestGenres() {
@@ -688,11 +770,29 @@ function wizard(runId, initialSteps, saved) {
         if (r.ok) {
           this.structureProfile = await r.json();
           this.structureInstruction = '';
-          this.followStructure = true;
+          this.lyricsMode = 'structure';
         } else {
           alert('Nenhuma referência para analisar. Adicione ao menos um rap de referência primeiro.');
         }
       } finally { this.busy.structure = false; }
+    },
+
+    async refreshStory() {
+      this.busy.story = true;
+      try {
+        const r = await fetch(`/api/runs/${this.runId}/story-profile/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ instruction: this.storyInstruction.trim() }),
+        });
+        if (r.ok) {
+          this.storyProfile = await r.json();
+          this.storyInstruction = '';
+          this.lyricsMode = 'rewrite';
+        } else {
+          alert('Nenhuma referência para analisar. Adicione ao menos um rap de referência primeiro.');
+        }
+      } finally { this.busy.story = false; }
     },
 
     async addReference() {
@@ -774,6 +874,7 @@ function wizard(runId, initialSteps, saved) {
         if (!r.ok) { alert('Não foi possível salvar a letra desta referência.'); return; }
         // Lore/structure caches were invalidated server-side; refresh local views.
         this.structureProfile = null;
+        this.storyProfile = null;
         await this.loadOutputs();
       } finally { this.busy.refLyrics = null; }
     },
@@ -804,7 +905,7 @@ function wizard(runId, initialSteps, saved) {
         : 'Gerar letra chama a API Anthropic.';
       if (!confirm(msg + '\n\nContinuar?')) return;
       this.lyricsOutput = {};
-      this.runStep('lyrics', { genre: this.chosenGenre, ref_index: this.chosenRefIndex, follow_structure: this.followStructure }, regenerating);
+      this.runStep('lyrics', { genre: this.chosenGenre, ref_index: this.chosenRefIndex, mode: this.lyricsMode, new_hook: this.newHook }, regenerating);
     },
 
     async runStep(stepId, params, force) {
