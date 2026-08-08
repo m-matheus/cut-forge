@@ -11,35 +11,57 @@ from cutforge.models.project import VideoProject
 
 MUSIC_BASELINE = """
 Create a high-CTR anime music video thumbnail. Study how top channels (Sensei Beats,
-Rustage, 7 Minutoz) design their thumbnails — this is the benchmark.
+Rustage, 7 Minutoz, Ishida Music) design their thumbnails — this is the benchmark.
+
+ART STYLE (critical):
+Clean, ultra-detailed 2D anime illustration. Sharp outlines, cel-shading with dramatic
+lighting. NOT 3D render, NOT realistic, NOT photorealistic. The quality must match
+professional anime key art — like an official illustration from the anime studio itself,
+but with maximum cinematic energy.
 
 CHARACTER (primary focus):
 The featured character fills 70-80% of the frame. Close shot: face, neck, and upper
-chest. The face must be FRONT-FACING or at a slight dramatic angle toward the viewer —
-the eyes must make direct, intense contact with the camera. Render the character in
-their most powerful, iconic form. Maximum detail, sharp edges, cinematic anime key art.
+chest visible. The face must be FRONT-FACING or at a slight dramatic angle toward the
+viewer — eyes must make direct, intense contact with the camera. Render the character
+in their most powerful, iconic form with their exact signature costume and accessories.
+Expression: powerful and iconic, matching both the character's personality and the
+song's mood — whether that's an arrogant smirk, stoic intensity, fierce determination,
+sorrowful resolve, or a battle-ready glare. Let the character's nature guide the face.
+Eyes are vivid and expressive; if the character has a signature power or energy color,
+their eyes should reflect or glow with it.
+
+LIGHTING (critical):
+Extreme rim/edge lighting outlines the character in their signature power color, as if
+their body emits energy. The character glows. Face lit dramatically from below or the
+side. Strong contrast between the lit face and the character's outfit silhouette.
 
 BACKGROUND (secondary, supporting):
-Simple but atmospheric — energy aura, particles, color burst, or an abstract
-environmental effect tied to the character's power. The background MUST NOT compete
-with the character. Dark edges / subtle vignette to push the character forward.
+Two-tone or split-color background preferred — two contrasting colors drawn from the
+character's own palette, divided diagonally or with an energy explosion at the center.
+Add energy particles, lightning bolts, speed lines, or abstract power bursts that match
+the character's abilities or the song's mood. Background MUST NOT compete with the
+character — use a strong vignette/dark blur toward the edges.
 
 COLOR GRADING:
-One dominant color tied to the character's signature palette. Highly saturated,
-cinematic, contrasty. Instantly recognizable by color alone.
+Hyper-saturated, electric, neon-level vibrancy. Maximum contrast. Colors must look
+almost unrealistically vivid — like a phone wallpaper people stop to stare at. Pick the
+character's two most iconic colors and use them as the dominant palette.
 
-STYLE:
-Album cover energy. Dramatic rim lighting and glow on the character, lit from behind
-with their signature color. Face is detailed and expressive.
+COMPOSITION:
+Album cover energy. The character commands the frame with an aura that fully matches
+the song's mood and their own personality. Every pixel should make the viewer stop
+scrolling.
 
-NO watermarks, NO channel logos, NO character names on the image.
+NO watermarks, NO channel logos, NO character names, NO text on the image.
 Only include a genre badge if one is specified below.
 """.strip()
 
 
 def _build_request(project: VideoProject, genre_badge: str | None) -> str:
     sections = [
-        ("Featured character(s)", project.character),
+        ("Featured character(s) — render their exact canonical design (hair, eyes, "
+         "outfit, accessories — do NOT change or omit any signature feature)",
+         project.character),
         ("Anime / Series", project.anime),
         ("Song vibe / mood", project.mood or "dark, powerful, cinematic"),
     ]
@@ -55,8 +77,10 @@ def _build_request(project: VideoProject, genre_badge: str | None) -> str:
         )
 
     palette_hint = (
-        f"Draw the background color palette from {project.anime}'s official art."
-        if project.anime else ""
+        f"The character's signature colors and {project.anime}'s official color palette "
+        f"should dominate the composition — use neon/electric versions of those exact colors."
+        if project.anime else
+        "Use hyper-saturated, neon/electric versions of the character's signature colors."
     )
 
     return "\n\n".join(filter(None, [
