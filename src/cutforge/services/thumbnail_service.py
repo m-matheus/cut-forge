@@ -48,7 +48,6 @@ Hyper-saturated, electric, neon-level vibrancy with maximum contrast — colors 
 unrealistically vivid, the kind of image people stop scrolling for.
 
 NO watermarks, NO channel logos, NO character names, NO text on the image.
-Only include a genre badge if one is specified below.
 """.strip()
 
 VISUAL_ANALYSIS_SYSTEM_PROMPT = """\
@@ -111,8 +110,16 @@ def _analysis_block(data: dict) -> str:
     return "CHARACTER VISUAL DIRECTION (follow exactly):\n" + "\n".join(lines)
 
 
-def _build_request(project: VideoProject, genre_badge: str | None,
-                   analysis: dict | None = None) -> str:
+_STYLE_REF_NOTE = (
+    "STYLE REFERENCE IMAGES are attached. Use them ONLY as a guide for composition, "
+    "framing/crop, lighting, color energy and how accessories and hands are posed — match "
+    "that visual language. Do NOT copy their exact character art; render the character "
+    "described above in their own canonical design."
+)
+
+
+def _build_request(project: VideoProject, analysis: dict | None = None,
+                   *, has_refs: bool = False) -> str:
     sections = [
         ("Featured character(s)", project.character),
         ("Anime / Series", project.anime),
@@ -120,34 +127,26 @@ def _build_request(project: VideoProject, genre_badge: str | None,
     ]
     context = "\n\n".join(f"{label}:\n{value}" for label, value in sections if value)
 
-    badge_block = ""
-    if genre_badge:
-        badge_block = (
-            f"GENRE BADGE (bottom-left corner), Sensei Beats style: a small 'ENKAI' "
-            f"credit line above a large bold '{genre_badge.upper()}' in a heavy condensed "
-            f"impact font, both on a dark semi-transparent rectangle bleeding into the "
-            f"bottom-left edges."
-        )
-
     return "\n\n".join(filter(None, [
         "Create a thumbnail for an anime music video (character key art, album-cover energy).",
         context,
         _analysis_block(analysis or {}),
         MUSIC_BASELINE,
-        badge_block,
+        _STYLE_REF_NOTE if has_refs else "",
     ])).strip()
 
 
-def generate_thumbnail(project: VideoProject, *, genre_badge: str | None = None,
-                       on_log=None) -> str:
+def generate_thumbnail(project: VideoProject, *, on_log=None) -> str:
     """Generate the 16:9 music thumbnail and save it as thumbnail/thumbnail.jpg."""
     if not project.character:
         raise ValueError("Thumbnail needs a character — set it on the project first.")
 
+    refs = project.thumbnail_ref_paths()
     analysis = _analyze_visual(project, on_log=on_log)
-    request = _build_request(project, genre_badge, analysis)
+    request = _build_request(project, analysis, has_refs=bool(refs))
     raw_path = project.thumbnail_dir / "raw.png"
-    openai_images.generate_image(request, raw_path, portrait=False, on_log=on_log)
+    openai_images.generate_image(request, raw_path, portrait=False,
+                                 reference_images=refs, on_log=on_log)
 
     from PIL import Image
     Image.open(raw_path).convert("RGB").resize((1280, 720), Image.LANCZOS).save(

@@ -505,8 +505,10 @@
             <!-- THUMBNAIL -->
             <template x-if="step.id === 'thumbnail'">
               <div>
-                <input placeholder="Genre badge (RAP, PHONK…) — opcional" x-model="genreBadge">
-                <button @click="confirmRun('thumbnail', { genre_badge: genreBadge }, 'Gerar thumbnail chama a API OpenAI Images.')"
+                <p><small>Envie prints de thumbnails que você gosta (opcional) — serão usados como molde de estilo (composição, enquadramento, luz).</small></p>
+                <input type="file" accept="image/*" multiple @change="uploadThumbnailRefs($event)">
+                <small x-show="thumbnailRefsCount > 0" class="ok"><span x-text="thumbnailRefsCount"></span> imagem(ns) de referência ✓</small>
+                <button @click="confirmRun('thumbnail', {}, 'Gerar thumbnail chama a API OpenAI Images.')"
                         :disabled="running"
                         :aria-busy="running && current==='thumbnail'">Gerar thumbnail</button>
                 <template x-if="step.status==='done'">
@@ -624,7 +626,7 @@ function wizard(runId, initialSteps, saved) {
     newReferenceSource: 'manual',
     newSubLangs: null,
     referenceProfiles: [],
-    genreBadge: '',
+    thumbnailRefsCount: 0,
     trackUploaded: false,
     lyricsTab: 'generate',
     lyricsOutput: {},
@@ -699,6 +701,9 @@ function wizard(runId, initialSteps, saved) {
         this.referenceUrls = rd.urls || [];
         this.hasReference = this.referenceProfiles.length > 0;
       }
+      // Thumbnail style-reference images (persist per run).
+      const trefs = await fetch(`/api/runs/${this.runId}/thumbnail-refs`);
+      if (trefs.ok) this.thumbnailRefsCount = (await trefs.json()).count || 0;
       if (done('lyrics')) {
         const r = await fetch(`/api/runs/${this.runId}/output/lyrics`);
         if (r.ok) this.lyricsOutput = await r.json();
@@ -927,6 +932,17 @@ function wizard(runId, initialSteps, saved) {
       await fetch(`/api/runs/${this.runId}/track`, { method: 'POST', body: fd });
       this.trackUploaded = true;
       this.refreshState();
+    },
+
+    async uploadThumbnailRefs(ev) {
+      const files = ev.target.files;
+      if (!files || !files.length) return;
+      const fd = new FormData();
+      for (const f of files) fd.append('files', f);
+      const res = await fetch(`/api/runs/${this.runId}/thumbnail-refs`, { method: 'POST', body: fd });
+      const data = await res.json();
+      this.thumbnailRefsCount = data.count || 0;
+      this.toast(`${this.thumbnailRefsCount} imagem(ns) de referência enviada(s)`);
     },
 
     async openFolder() {

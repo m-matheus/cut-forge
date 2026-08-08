@@ -108,6 +108,20 @@ class VideoProject(BaseModel):
         return self.thumbnail_dir / "thumbnail.jpg"
 
     @property
+    def thumbnail_refs_dir(self) -> Path:
+        # Optional style/composition reference images uploaded for this run.
+        return self.thumbnail_dir / "refs"
+
+    def thumbnail_ref_paths(self) -> list[Path]:
+        """Reference images for this run's thumbnail, sorted; empty if none."""
+        refs_dir = self.thumbnail_refs_dir
+        if not refs_dir.exists():
+            return []
+        exts = {".png", ".jpg", ".jpeg", ".webp"}
+        return sorted(p for p in refs_dir.iterdir()
+                      if p.is_file() and p.suffix.lower() in exts)
+
+    @property
     def metadata_path(self) -> Path:
         return self.run_dir / "script" / "metadata.json"
 

@@ -14,6 +14,16 @@ from cutforge.config.settings import get_settings
 SIZE_LANDSCAPE = "1536x1024"
 SIZE_PORTRAIT = "1024x1536"
 
+_MIME_BY_EXT = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+                ".webp": "image/webp"}
+
+
+def _to_data_url(path: Path) -> str:
+    """Read an image file and return it as a base64 ``data:`` URL."""
+    mime = _MIME_BY_EXT.get(path.suffix.lower(), "image/png")
+    b64 = base64.b64encode(path.read_bytes()).decode("utf-8")
+    return f"data:{mime};base64,{b64}"
+
 
 def generate_image(
     request: str,
@@ -21,21 +31,39 @@ def generate_image(
     *,
     portrait: bool = False,
     quality: str = "high",
+    reference_images: list[Path] | None = None,
     on_log=None,
 ) -> Path:
-    """Generate an image from a natural-language request and write it to ``out_path``."""
+    """Generate an image from a natural-language request and write it to ``out_path``.
+
+    If ``reference_images`` is given, they are passed to the model as ``input_image``
+    blocks (style/composition guides) alongside the text prompt.
+    """
     from openai import OpenAI
 
     settings = get_settings()
     client = OpenAI(api_key=settings.require("openai_api_key"))
     size = SIZE_PORTRAIT if portrait else SIZE_LANDSCAPE
 
+    if reference_images:
+        model_input = [{
+            "role": "user",
+            "content": [
+                {"type": "input_text", "text": request},
+                *({"type": "input_image", "image_url": _to_data_url(p), "detail": "auto"}
+                  for p in reference_images),
+            ],
+        }]
+    else:
+        model_input = request
+
     if on_log:
-        on_log(f"Requesting image ({size}): {request[:100]}...")
+        refs_note = f" + {len(reference_images)} ref(s)" if reference_images else ""
+        on_log(f"Requesting image ({size}){refs_note}: {request[:100]}...")
 
     response = client.responses.create(
         model="gpt-4o",
-        input=request,
+        input=model_input,
         tools=[{"type": "image_generation", "quality": quality, "size": size}],
     )
     image_data = next(

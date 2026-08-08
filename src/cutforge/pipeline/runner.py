@@ -101,8 +101,7 @@ def _execute(step_id: str, project: VideoProject, params: dict, log: LogFn):
         return {"ok": True}
 
     if step_id == "thumbnail":
-        path = thumbnail_service.generate_thumbnail(
-            project, genre_badge=params.get("genre_badge"), on_log=log)
+        path = thumbnail_service.generate_thumbnail(project, on_log=log)
         return {"path": path}
 
     if step_id == "metadata":

@@ -319,6 +319,38 @@ def create_app() -> FastAPI:
         project.track_path.write_bytes(data)
         return {"status": "ok", "size": len(data)}
 
+    # ---- Thumbnail style-reference images (optional, per run) ----
+    _IMG_EXTS = {".png", ".jpg", ".jpeg", ".webp"}
+
+    @app.post("/api/runs/{run_id}/thumbnail-refs")
+    async def upload_thumbnail_refs(run_id: str, files: list[UploadFile]):
+        project = VideoProject.load(run_id)
+        refs_dir = project.thumbnail_refs_dir
+        refs_dir.mkdir(parents=True, exist_ok=True)
+        saved = 0
+        # Continue numbering after any existing refs so multiple uploads accumulate.
+        existing = len(project.thumbnail_ref_paths())
+        for file in files:
+            ext = Path(file.filename or "").suffix.lower()
+            if ext not in _IMG_EXTS:
+                continue
+            data = await file.read()
+            (refs_dir / f"ref_{existing + saved + 1:02d}{ext}").write_bytes(data)
+            saved += 1
+        return {"status": "ok", "count": len(project.thumbnail_ref_paths()), "added": saved}
+
+    @app.get("/api/runs/{run_id}/thumbnail-refs")
+    def list_thumbnail_refs(run_id: str):
+        project = VideoProject.load(run_id)
+        return {"count": len(project.thumbnail_ref_paths())}
+
+    @app.delete("/api/runs/{run_id}/thumbnail-refs")
+    def clear_thumbnail_refs(run_id: str):
+        project = VideoProject.load(run_id)
+        for p in project.thumbnail_ref_paths():
+            p.unlink(missing_ok=True)
+        return {"status": "ok", "count": 0}
+
     # ---- SSE log stream ----
     @app.get("/api/runs/{run_id}/events")
     async def stream_events(run_id: str, request: Request):
