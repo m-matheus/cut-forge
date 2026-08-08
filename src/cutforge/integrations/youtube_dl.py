@@ -15,6 +15,14 @@ from pathlib import Path
 
 YT_DLP = [sys.executable, "-m", "yt_dlp"]
 
+# YouTube's DEFAULT player client (an Android variant) hides the channel's MANUAL
+# subtitle tracks in environments without a JavaScript runtime — it only exposes the
+# ``live_chat`` replay. The ``web_embedded`` client lists and serves the real manual
+# subtitles regardless. ``--ignore-no-formats-error`` is required alongside it because
+# yt-dlp still resolves (and here fails to find, without a JS runtime) a video format
+# even under ``--skip-download``; without the flag it aborts before writing the subs.
+_SUB_CLIENT_ARGS = ["--extractor-args", "youtube:player_client=web_embedded"]
+
 
 def probe(url: str) -> dict:
     """Fetch video metadata without downloading."""
@@ -39,18 +47,33 @@ def list_manual_subtitles(url: str) -> list[dict]:
     the exact codes to pass to ``download_subtitles`` (e.g. ``pt``, ``pt-BR``, ``en``,
     ``ja``) — YouTube's real codes, not the human names shown in the player. Automatic
     (ASR) captions under ``automatic_captions`` are deliberately ignored.
+
+    ``live_chat`` is filtered out: it is the live-stream chat replay (JSON, not lyric
+    text) that YouTube exposes under ``subtitles``, never an actual caption track. Tracks
+    that offer no text format (vtt/srt/ttml) are dropped for the same reason.
     """
     result = subprocess.run(
-        YT_DLP + ["--dump-json", "--no-playlist", url],
+        YT_DLP + _SUB_CLIENT_ARGS
+        + ["--dump-json", "--ignore-no-formats-error", "--no-playlist", url],
         capture_output=True, text=True, encoding="utf-8", check=True,
     )
     info = json.loads(result.stdout)
     subs = info.get("subtitles") or {}
+    text_exts = {"vtt", "srt", "ttml", "srv1", "srv2", "srv3"}
     out = []
     for code, tracks in subs.items():
+        if code == "live_chat":
+            continue
         name = ""
-        if isinstance(tracks, list) and tracks:
-            name = tracks[0].get("name", "") or ""
+        has_text = False
+        if isinstance(tracks, list):
+            for t in tracks:
+                if t.get("ext") in text_exts:
+                    has_text = True
+                if not name:
+                    name = t.get("name", "") or ""
+        if not has_text:
+            continue
         out.append({"code": code, "name": name})
     out.sort(key=lambda s: s["code"])
     return out
@@ -99,21 +122,29 @@ def download(url: str, dest: Path, *, on_log=None) -> dict:
 
 _VTT_TIMING = re.compile(r"^\d{2}:\d{2}:\d{2}[.,]\d{3}\s*-->")
 _VTT_CUE_INDEX = re.compile(r"^\d+$")
-# Inline cue tags: <c>, </c>, <c.colorXXXX>, karaoke timestamps like <00:00:01.234>.
-_VTT_INLINE_TAG = re.compile(r"</?c[^>]*>|<\d{2}:\d{2}:\d{2}[.,]\d{3}>")
+# Any inline/markup tag: <c>, </c>, <c.colorXXXX>, <b>, </b>, karaoke <00:00:01.234>, etc.
+_VTT_ANY_TAG = re.compile(r"<[^>]*>")
+# Zero-width & non-breaking spacing that animated captions inject between glyphs.
+_VTT_ZERO_WIDTH = re.compile(r"[​‌‍﻿ ]")
+_WS_RUN = re.compile(r"\s+")
 
 
 def _vtt_to_text(vtt: str) -> str:
     """Strip a WebVTT subtitle file down to plain lyric text.
 
-    Removes the ``WEBVTT`` header, ``NOTE``/``STYLE`` blocks, numeric cue indices,
-    ``HH:MM:SS.mmm --> …`` timing lines and inline cue tags. Animated/karaoke captions
-    repeat the same line across overlapping cues, so consecutive identical lines are
-    collapsed (conservative: only *adjacent* exact duplicates, leaving a genuinely
-    repeated chorus line elsewhere intact).
+    Handles heavily-animated karaoke captions (the common case for lyric videos): a giant
+    ``STYLE``/``::cue`` colour table in the header, every line wrapped in ``<c.colorXXXX>``
+    and ``<b>`` tags with ``​`` zero-width spaces sprinkled between glyphs, and each
+    line repeated across dozens of near-identical cues as the colour sweep animates.
+
+    Removes the header block, ``NOTE``/``STYLE``/``::cue`` styling, numeric cue indices,
+    ``HH:MM:SS.mmm --> …`` timing lines, ALL markup tags and zero-width spacing, then
+    normalises whitespace. Consecutive identical lines are collapsed — which, once the
+    tags/zero-width noise is gone, folds the karaoke sweep of a line down to one copy while
+    still preserving a chorus line that genuinely recurs later in the song.
     """
-    # Drop the leading header block (``WEBVTT`` line plus ``Kind:``/``Language:`` metadata,
-    # terminated by the first blank line) so those lines never reach the lyric output.
+    # Drop the leading header block (``WEBVTT`` line plus ``Kind:``/``Language:`` metadata
+    # and any inline ``Style:``/``::cue`` colour table) up to the first blank line.
     raw_lines = vtt.splitlines()
     if raw_lines and raw_lines[0].lstrip().startswith("WEBVTT"):
         i = 0
@@ -126,16 +157,21 @@ def _vtt_to_text(vtt: str) -> str:
         line = raw.strip()
         if not line:
             continue
-        if line.startswith("WEBVTT") or line.startswith("NOTE") or line.startswith("STYLE"):
+        # Skip styling / structural noise (defensive — most is dropped with the header).
+        if (line.startswith("WEBVTT") or line.startswith("NOTE") or line.startswith("STYLE")
+                or line.startswith("::cue") or line.startswith("Style:") or line == "}"
+                or line == "##"):
             continue
         if "-->" in line and _VTT_TIMING.match(line):
             continue
         if _VTT_CUE_INDEX.match(line):
             continue
-        line = _VTT_INLINE_TAG.sub("", line).strip()
+        line = _VTT_ANY_TAG.sub("", line)
+        line = _VTT_ZERO_WIDTH.sub("", line)
+        line = _WS_RUN.sub(" ", line).strip()
         if not line:
             continue
-        # Collapse consecutive exact repeats (animated-caption artifact).
+        # Collapse consecutive exact repeats (animated/karaoke-caption artifact).
         if lines and lines[-1] == line:
             continue
         lines.append(line)
@@ -155,9 +191,10 @@ def download_subtitles(url: str, out_dir: Path, *, lang: str = "en", on_log=None
     log = on_log or (lambda _m: None)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_template = str(out_dir / "%(id)s.%(ext)s")
-    cmd = YT_DLP + [
+    cmd = YT_DLP + _SUB_CLIENT_ARGS + [
         "--write-subs",
         "--skip-download",
+        "--ignore-no-formats-error",
         "--no-playlist",
         "--sub-langs", lang,
         "--sub-format", "vtt",
