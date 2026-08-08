@@ -61,10 +61,16 @@ def generate_image(
         refs_note = f" + {len(reference_images)} ref(s)" if reference_images else ""
         on_log(f"Requesting image ({size}){refs_note}: {request[:100]}...")
 
+    # When reference images are attached, force high input fidelity so the model actually
+    # follows them — the tool defaults to "low", which treats them as loose context.
+    image_tool = {"type": "image_generation", "quality": quality, "size": size}
+    if reference_images:
+        image_tool["input_fidelity"] = "high"
+
     response = client.responses.create(
         model="gpt-4o",
         input=model_input,
-        tools=[{"type": "image_generation", "quality": quality, "size": size}],
+        tools=[image_tool],
     )
     image_data = next(
         (item.result for item in response.output

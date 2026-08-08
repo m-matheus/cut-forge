@@ -110,16 +110,8 @@ def _analysis_block(data: dict) -> str:
     return "CHARACTER VISUAL DIRECTION (follow exactly):\n" + "\n".join(lines)
 
 
-_STYLE_REF_NOTE = (
-    "STYLE REFERENCE IMAGES are attached. Use them ONLY as a guide for composition, "
-    "framing/crop, lighting, color energy and how accessories and hands are posed — match "
-    "that visual language. Do NOT copy their exact character art; render the character "
-    "described above in their own canonical design."
-)
-
-
-def _build_request(project: VideoProject, analysis: dict | None = None,
-                   *, has_refs: bool = False) -> str:
+def _build_request(project: VideoProject, analysis: dict | None = None) -> str:
+    """Text-led prompt (no reference images): the full baseline drives the look."""
     sections = [
         ("Featured character(s)", project.character),
         ("Anime / Series", project.anime),
@@ -132,8 +124,30 @@ def _build_request(project: VideoProject, analysis: dict | None = None,
         context,
         _analysis_block(analysis or {}),
         MUSIC_BASELINE,
-        _STYLE_REF_NOTE if has_refs else "",
     ])).strip()
+
+
+def _build_request_with_refs(project: VideoProject) -> str:
+    """Reference-led prompt: the attached images drive composition/pose/hands/lighting.
+
+    Kept deliberately SHORT so it does not override the reference. In particular we do NOT
+    dictate a specific hand gesture here — letting the reference lead the pose avoids the
+    mangled-hands failure that comes from describing hands in text.
+    """
+    who = project.character
+    if project.anime:
+        who += f" (from {project.anime})"
+    return (
+        f"Recreate this thumbnail as closely as possible, but replace the character with "
+        f"{who}, rendered in their exact canonical design (correct hair, eyes, outfit and "
+        f"accessories).\n\n"
+        f"Match the attached reference image as your PRIMARY guide: the same composition, "
+        f"framing and crop, the same pose and hand position, the same facial expression, the "
+        f"same lighting and background energy, the same color palette and mood. Keep the "
+        f"hands and anatomy clean and correct — natural human hands.\n\n"
+        f"Clean 2D anime illustration matching the reference's art style. "
+        f"NO text, NO logos, NO watermarks, NO channel names on the image."
+    )
 
 
 def generate_thumbnail(project: VideoProject, *, on_log=None) -> str:
@@ -142,8 +156,13 @@ def generate_thumbnail(project: VideoProject, *, on_log=None) -> str:
         raise ValueError("Thumbnail needs a character — set it on the project first.")
 
     refs = project.thumbnail_ref_paths()
-    analysis = _analyze_visual(project, on_log=on_log)
-    request = _build_request(project, analysis, has_refs=bool(refs))
+    if refs:
+        # Reference-led: short prompt, let the image dominate. Skip the text analysis so it
+        # doesn't fight the reference (that analysis is what dictated the wrong gesture).
+        request = _build_request_with_refs(project)
+    else:
+        analysis = _analyze_visual(project, on_log=on_log)
+        request = _build_request(project, analysis)
     raw_path = project.thumbnail_dir / "raw.png"
     openai_images.generate_image(request, raw_path, portrait=False,
                                  reference_images=refs, on_log=on_log)
