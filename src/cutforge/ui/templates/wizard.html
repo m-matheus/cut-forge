@@ -60,16 +60,29 @@
                         </div>
                         <details style="margin-top:.4rem">
                           <summary style="font-size:.75rem;cursor:pointer;opacity:.75">Ver / corrigir letra</summary>
-                          <p style="margin:.4rem 0 .3rem"><small class="muted">O Whisper erra bastante em rap. Cole a letra correta, ou busque as legendas manuais do canal (não as automáticas). O texto é usado como transcrição — lore + estrutura re-extraem a partir dele.</small></p>
-                          <div style="display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem">
-                            <button class="secondary outline copy-btn" style="margin:0"
-                                    @click="fetchSubtitles(ref)"
-                                    :aria-busy="busy.refSubs === ref.index" :disabled="busy.refSubs === ref.index">
-                              Buscar legendas do canal
-                            </button>
-                            <input style="width:5rem;font-size:.8rem;margin:0" x-model="ref._subLang"
-                                   placeholder="idioma" title="Código do idioma da legenda (ex: en, pt, es)">
-                          </div>
+                          <p style="margin:.4rem 0 .3rem"><small class="muted">O Whisper erra bastante em rap. Cole a letra correta, ou liste as legendas manuais do canal (não as automáticas) e escolha o idioma. O texto é usado como transcrição — lore + estrutura re-extraem a partir dele.</small></p>
+                          <button class="secondary outline copy-btn" style="margin:0 0 .35rem"
+                                  @click="listSubtitleLangs(ref)"
+                                  :aria-busy="busy.refSubs === ref.index" :disabled="busy.refSubs === ref.index">
+                            Listar legendas do canal
+                          </button>
+                          <template x-if="ref._subLangs">
+                            <div style="margin-bottom:.4rem">
+                              <template x-if="ref._subLangs.length > 0">
+                                <div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center">
+                                  <small class="muted">Idiomas disponíveis:</small>
+                                  <template x-for="l in ref._subLangs" :key="l.code">
+                                    <button class="secondary outline" style="padding:.15rem .5rem;font-size:.75rem;margin:0"
+                                            @click="fetchSubtitles(ref, l.code)" :disabled="busy.refSubs === ref.index"
+                                            x-text="l.name ? `${l.name} (${l.code})` : l.code"></button>
+                                  </template>
+                                </div>
+                              </template>
+                              <template x-if="ref._subLangs.length === 0">
+                                <small class="muted">Este vídeo não tem legenda manual. Cole a letra abaixo ou use o Whisper.</small>
+                              </template>
+                            </div>
+                          </template>
                           <textarea rows="6" style="width:100%;font-size:.8rem" x-model="ref.transcript"
                                     placeholder="Cole a letra correta desta referência…"></textarea>
                           <button class="secondary outline copy-btn" style="margin-top:.35rem"
@@ -95,17 +108,30 @@
                 </div>
                 <details style="margin-top:.4rem">
                   <summary style="font-size:.75rem;cursor:pointer;opacity:.75">Letra da referência (opcional — evita o Whisper)</summary>
-                  <p style="margin:.4rem 0 .3rem"><small class="muted">O Whisper erra bastante em rap. Cole a letra (ex: da descrição), ou busque as legendas manuais do canal. Havendo letra aqui, o Whisper <strong>não</strong> roda ao analisar.</small></p>
-                  <div style="display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem">
-                    <button class="secondary outline copy-btn" style="margin:0"
-                            @click="fetchSubtitlesForNew()"
-                            :disabled="!newReferenceUrl.trim() || busy.newSubs"
-                            :aria-busy="busy.newSubs">
-                      Buscar legendas do canal
-                    </button>
-                    <input style="width:5rem;font-size:.8rem;margin:0" x-model="newReferenceSubLang"
-                           placeholder="idioma" title="Código do idioma da legenda (ex: en, pt, es)">
-                  </div>
+                  <p style="margin:.4rem 0 .3rem"><small class="muted">O Whisper erra bastante em rap. Cole a letra (ex: da descrição), ou liste as legendas manuais do canal e escolha o idioma. Havendo letra aqui, o Whisper <strong>não</strong> roda ao analisar.</small></p>
+                  <button class="secondary outline copy-btn" style="margin:0 0 .35rem"
+                          @click="listSubtitleLangs()"
+                          :disabled="!newReferenceUrl.trim() || busy.newSubs"
+                          :aria-busy="busy.newSubs">
+                    Listar legendas do canal
+                  </button>
+                  <template x-if="newSubLangs !== null">
+                    <div style="margin-bottom:.4rem">
+                      <template x-if="newSubLangs.length > 0">
+                        <div style="display:flex;flex-wrap:wrap;gap:.35rem;align-items:center">
+                          <small class="muted">Idiomas disponíveis:</small>
+                          <template x-for="l in newSubLangs" :key="l.code">
+                            <button class="secondary outline" style="padding:.15rem .5rem;font-size:.75rem;margin:0"
+                                    @click="fetchSubtitlesForNew(l.code)" :disabled="busy.newSubs"
+                                    x-text="l.name ? `${l.name} (${l.code})` : l.code"></button>
+                          </template>
+                        </div>
+                      </template>
+                      <template x-if="newSubLangs.length === 0">
+                        <small class="muted">Este vídeo não tem legenda manual (só as automáticas do YouTube, que não usamos). Cole a letra abaixo ou use o Whisper.</small>
+                      </template>
+                    </div>
+                  </template>
                   <textarea rows="6" style="width:100%;font-size:.8rem" x-model="newReferenceLyrics"
                             @input="newReferenceSource='manual'"
                             placeholder="Cole a letra da música de referência…"></textarea>
@@ -516,6 +542,7 @@ function wizard(runId, initialSteps, saved) {
     newReferenceLyrics: '',
     newReferenceSubLang: saved.language || 'en',
     newReferenceSource: 'manual',
+    newSubLangs: null,
     referenceProfiles: [],
     genreBadge: '',
     trackUploaded: false,
@@ -586,6 +613,7 @@ function wizard(runId, initialSteps, saved) {
         this.referenceProfiles = (rd.profiles || []).map(p => ({
           ...p,
           _subLang: this.projectLanguage,
+          _subLangs: null,
           _pendingSource: null,
         }));
         this.referenceUrls = rd.urls || [];
@@ -679,10 +707,29 @@ function wizard(runId, initialSteps, saved) {
       await this.runStep('reference', { url, index, lyrics, lyrics_source });
     },
 
-    async fetchSubtitlesForNew() {
+    // List the video's ACTUAL manual-subtitle language codes (no guessing).
+    // ref undefined → add-time (uses newReferenceUrl, fills this.newSubLangs);
+    // ref defined   → existing reference (uses stored URL via index, fills ref._subLangs).
+    async listSubtitleLangs(ref) {
+      const url = ref ? (ref.source_url || '') : this.newReferenceUrl.trim();
+      if (!url) { alert('Informe a URL do vídeo primeiro.'); return; }
+      const index = ref ? ref.index : 0;
+      if (ref) { this.busy.refSubs = ref.index; } else { this.busy.newSubs = true; }
+      try {
+        const r = await fetch(`/api/runs/${this.runId}/references/${index}/subtitle-langs?url=${encodeURIComponent(url)}`);
+        if (!r.ok) { alert('Não foi possível listar as legendas do vídeo.'); return; }
+        const data = await r.json();
+        const langs = data.langs || [];
+        if (ref) { ref._subLangs = langs; } else { this.newSubLangs = langs; }
+      } finally {
+        if (ref) { this.busy.refSubs = null; } else { this.busy.newSubs = false; }
+      }
+    },
+
+    async fetchSubtitlesForNew(langCode) {
       const url = this.newReferenceUrl.trim();
       if (!url) return;
-      const lang = (this.newReferenceSubLang || this.projectLanguage || 'en').trim();
+      const lang = (langCode || this.newReferenceSubLang || this.projectLanguage || 'en').trim();
       this.busy.newSubs = true;
       try {
         const r = await fetch(`/api/runs/${this.runId}/references/0/subtitles?lang=${encodeURIComponent(lang)}&url=${encodeURIComponent(url)}`);
@@ -697,8 +744,8 @@ function wizard(runId, initialSteps, saved) {
       } finally { this.busy.newSubs = false; }
     },
 
-    async fetchSubtitles(ref) {
-      const lang = (ref._subLang || this.projectLanguage || 'en').trim();
+    async fetchSubtitles(ref, langCode) {
+      const lang = (langCode || ref._subLang || this.projectLanguage || 'en').trim();
       this.busy.refSubs = ref.index;
       try {
         const r = await fetch(`/api/runs/${this.runId}/references/${ref.index}/subtitles?lang=${encodeURIComponent(lang)}`);

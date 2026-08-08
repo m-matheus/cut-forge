@@ -170,6 +170,22 @@ def create_app() -> FastAPI:
                 target, Path(tmp), lang=(lang or "en").strip(), on_log=log)
         return {"text": text, "available": bool(text.strip())}
 
+    @app.get("/api/runs/{run_id}/references/{index}/subtitle-langs")
+    def list_reference_subtitle_langs(run_id: str, index: int, url: str = ""):
+        project = VideoProject.load(run_id)
+        target = (url or "").strip()
+        if not target:
+            urls = project.reference_urls
+            if index >= len(urls) or not urls[index]:
+                return JSONResponse({"error": "reference not found"}, status_code=404)
+            target = urls[index]
+        from cutforge.integrations import youtube_dl
+        try:
+            langs = youtube_dl.list_manual_subtitles(target)
+        except Exception as exc:  # noqa: BLE001 — surface probe failures to the UI
+            return JSONResponse({"error": str(exc)}, status_code=502)
+        return {"langs": langs}
+
     @app.delete("/api/runs/{run_id}/references/{index}")
     def delete_reference(run_id: str, index: int):
         project = VideoProject.load(run_id)

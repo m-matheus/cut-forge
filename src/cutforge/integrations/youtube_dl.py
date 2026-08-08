@@ -32,6 +32,30 @@ def probe(url: str) -> dict:
     }
 
 
+def list_manual_subtitles(url: str) -> list[dict]:
+    """Return the MANUAL (channel-authored) subtitle languages available for ``url``.
+
+    Each entry is ``{"code": "<yt-dlp lang code>", "name": "<human label>"}``. These are
+    the exact codes to pass to ``download_subtitles`` (e.g. ``pt``, ``pt-BR``, ``en``,
+    ``ja``) — YouTube's real codes, not the human names shown in the player. Automatic
+    (ASR) captions under ``automatic_captions`` are deliberately ignored.
+    """
+    result = subprocess.run(
+        YT_DLP + ["--dump-json", "--no-playlist", url],
+        capture_output=True, text=True, encoding="utf-8", check=True,
+    )
+    info = json.loads(result.stdout)
+    subs = info.get("subtitles") or {}
+    out = []
+    for code, tracks in subs.items():
+        name = ""
+        if isinstance(tracks, list) and tracks:
+            name = tracks[0].get("name", "") or ""
+        out.append({"code": code, "name": name})
+    out.sort(key=lambda s: s["code"])
+    return out
+
+
 def download(url: str, dest: Path, *, on_log=None) -> dict:
     """Download the best <=1080p mp4 to ``dest`` and return metadata.
 
@@ -88,8 +112,17 @@ def _vtt_to_text(vtt: str) -> str:
     collapsed (conservative: only *adjacent* exact duplicates, leaving a genuinely
     repeated chorus line elsewhere intact).
     """
+    # Drop the leading header block (``WEBVTT`` line plus ``Kind:``/``Language:`` metadata,
+    # terminated by the first blank line) so those lines never reach the lyric output.
+    raw_lines = vtt.splitlines()
+    if raw_lines and raw_lines[0].lstrip().startswith("WEBVTT"):
+        i = 0
+        while i < len(raw_lines) and raw_lines[i].strip():
+            i += 1
+        raw_lines = raw_lines[i:]
+
     lines: list[str] = []
-    for raw in vtt.splitlines():
+    for raw in raw_lines:
         line = raw.strip()
         if not line:
             continue
