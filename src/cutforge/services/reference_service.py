@@ -146,8 +146,12 @@ def load_all_reference_profiles(project: VideoProject) -> list[dict]:
 
 
 def set_reference_lyrics(project: VideoProject, index: int, lyrics: str,
-                         *, on_log=None) -> dict | None:
-    """Overwrite one already-analyzed reference's transcript with manually-pasted lyrics.
+                         *, source: str = "manual", on_log=None) -> dict | None:
+    """Overwrite one already-analyzed reference's transcript with corrected lyrics.
+
+    ``source`` records where the text came from (``"manual"`` = pasted by hand,
+    ``"subtitles"`` = fetched from the channel's manual YouTube subtitles) and is stored
+    as ``lyrics_source`` on the profile so the UI can badge it.
 
     Use this to correct Whisper's mistranscription without re-downloading or re-analyzing
     the audio. Recomputes flow from the new word count against the cached duration/BPM,
@@ -167,7 +171,7 @@ def set_reference_lyrics(project: VideoProject, index: int, lyrics: str,
     lyrics_path = project.ref_lyrics_path(index)
 
     profile["transcript"] = lyrics
-    profile["lyrics_source"] = "manual"
+    profile["lyrics_source"] = source
 
     word_count = len(lyrics.split())
     bpm = profile.get("bpm", 0) or 0

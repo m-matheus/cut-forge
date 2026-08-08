@@ -10,7 +10,7 @@
 </nav>
 
 <article
-  x-data='wizard("{{ project.run_id }}", {{ steps | tojson }}, {{ {"footageUrl": project.footage_url, "referenceUrls": project.reference_urls} | tojson }})'
+  x-data='wizard("{{ project.run_id }}", {{ steps | tojson }}, {{ {"footageUrl": project.footage_url, "referenceUrls": project.reference_urls, "language": project.language} | tojson }})'
   x-init="init()">
 
   <hgroup>
@@ -52,15 +52,24 @@
                               <span style="font-size:.7rem;margin-left:.4rem;opacity:.6">(som primário)</span>
                             </template>
                             <span style="font-size:.65rem;margin-left:.4rem;padding:.1rem .35rem;border-radius:.25rem"
-                                  :style="ref.lyrics_source === 'manual' ? 'background:rgba(80,200,120,.18);color:#5c9' : 'background:rgba(255,255,255,.08);opacity:.6'"
-                                  x-text="ref.lyrics_source === 'manual' ? 'letra colada' : 'via Whisper'"></span>
+                                  :style="(ref.lyrics_source === 'manual' || ref.lyrics_source === 'subtitles') ? 'background:rgba(80,200,120,.18);color:#5c9' : 'background:rgba(255,255,255,.08);opacity:.6'"
+                                  x-text="ref.lyrics_source === 'manual' ? 'letra colada' : (ref.lyrics_source === 'subtitles' ? 'via legendas' : 'via Whisper')"></span>
                           </div>
                           <button class="secondary outline" style="padding:.2rem .5rem;font-size:.75rem"
                                   @click="removeReference(ref.index)" :disabled="running">✕</button>
                         </div>
                         <details style="margin-top:.4rem">
                           <summary style="font-size:.75rem;cursor:pointer;opacity:.75">Ver / corrigir letra</summary>
-                          <p style="margin:.4rem 0 .3rem"><small class="muted">O Whisper erra bastante em rap. Cole a letra correta aqui — ela será usada como transcrição (lore + estrutura re-extraem a partir dela).</small></p>
+                          <p style="margin:.4rem 0 .3rem"><small class="muted">O Whisper erra bastante em rap. Cole a letra correta, ou busque as legendas manuais do canal (não as automáticas). O texto é usado como transcrição — lore + estrutura re-extraem a partir dele.</small></p>
+                          <div style="display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem">
+                            <button class="secondary outline copy-btn" style="margin:0"
+                                    @click="fetchSubtitles(ref)"
+                                    :aria-busy="busy.refSubs === ref.index" :disabled="busy.refSubs === ref.index">
+                              Buscar legendas do canal
+                            </button>
+                            <input style="width:5rem;font-size:.8rem;margin:0" x-model="ref._subLang"
+                                   placeholder="idioma" title="Código do idioma da legenda (ex: en, pt, es)">
+                          </div>
                           <textarea rows="6" style="width:100%;font-size:.8rem" x-model="ref.transcript"
                                     placeholder="Cole a letra correta desta referência…"></textarea>
                           <button class="secondary outline copy-btn" style="margin-top:.35rem"
@@ -478,7 +487,7 @@ function wizard(runId, initialSteps, saved) {
     running: false,
     current: null,
     openStep: null,
-    busy: { suggest: false, lore: false, direction: false, structure: false, refLyrics: null },
+    busy: { suggest: false, lore: false, direction: false, structure: false, refLyrics: null, refSubs: null },
     genres: [],
     chosenGenre: '',
     chosenRefIndex: 0,
@@ -491,6 +500,7 @@ function wizard(runId, initialSteps, saved) {
     followStructure: false,
     footageUrl: saved.footageUrl || '',
     referenceUrls: saved.referenceUrls || [],
+    projectLanguage: saved.language || 'en',
     newReferenceUrl: '',
     newReferenceLyrics: '',
     referenceProfiles: [],
@@ -560,7 +570,11 @@ function wizard(runId, initialSteps, saved) {
       const refList = await fetch(`/api/runs/${this.runId}/references`);
       if (refList.ok) {
         const rd = await refList.json();
-        this.referenceProfiles = rd.profiles || [];
+        this.referenceProfiles = (rd.profiles || []).map(p => ({
+          ...p,
+          _subLang: this.projectLanguage,
+          _pendingSource: null,
+        }));
         this.referenceUrls = rd.urls || [];
         this.hasReference = this.referenceProfiles.length > 0;
       }
@@ -650,13 +664,32 @@ function wizard(runId, initialSteps, saved) {
       await this.runStep('reference', { url, index, lyrics });
     },
 
+    async fetchSubtitles(ref) {
+      const lang = (ref._subLang || this.projectLanguage || 'en').trim();
+      this.busy.refSubs = ref.index;
+      try {
+        const r = await fetch(`/api/runs/${this.runId}/references/${ref.index}/subtitles?lang=${encodeURIComponent(lang)}`);
+        if (!r.ok) { alert('Não foi possível buscar as legendas.'); return; }
+        const data = await r.json();
+        if (!data.available || !data.text.trim()) {
+          alert(`Nenhuma legenda manual encontrada no idioma "${lang}". Cole a letra manualmente ou use o Whisper.`);
+          return;
+        }
+        // Fill the review textarea; user confirms with the existing "Salvar letra".
+        ref.transcript = data.text;
+        ref._pendingSource = 'subtitles';
+      } finally { this.busy.refSubs = null; }
+    },
+
     async saveReferenceLyrics(index, lyrics) {
+      const ref = this.referenceProfiles.find(r => r.index === index);
+      const source = (ref && ref._pendingSource) || 'manual';
       this.busy.refLyrics = index;
       try {
         const r = await fetch(`/api/runs/${this.runId}/references/${index}/lyrics`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ lyrics: (lyrics || '').trim() }),
+          body: JSON.stringify({ lyrics: (lyrics || '').trim(), source }),
         });
         if (!r.ok) { alert('Não foi possível salvar a letra desta referência.'); return; }
         // Lore/structure caches were invalidated server-side; refresh local views.

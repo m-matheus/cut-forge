@@ -138,17 +138,32 @@ def create_app() -> FastAPI:
     def set_reference_lyrics(run_id: str, index: int, payload: dict | None = None):
         data = payload or {}
         lyrics = (data.get("lyrics") or "").strip()
+        source = (data.get("source") or "manual").strip() or "manual"
         project = VideoProject.load(run_id)
         from cutforge.services import reference_service
-        profile = reference_service.set_reference_lyrics(project, index, lyrics)
+        profile = reference_service.set_reference_lyrics(project, index, lyrics, source=source)
         if profile is None:
             return JSONResponse({"error": "reference not analyzed yet"}, status_code=404)
         return {
             "index": index,
             "source_title": profile.get("source_title", ""),
             "transcript": profile.get("transcript", ""),
-            "lyrics_source": profile.get("lyrics_source", "manual"),
+            "lyrics_source": profile.get("lyrics_source", source),
         }
+
+    @app.get("/api/runs/{run_id}/references/{index}/subtitles")
+    def fetch_reference_subtitles(run_id: str, index: int, lang: str = "en"):
+        project = VideoProject.load(run_id)
+        urls = project.reference_urls
+        if index >= len(urls) or not urls[index]:
+            return JSONResponse({"error": "reference not found"}, status_code=404)
+        import tempfile
+        from cutforge.integrations import youtube_dl
+        log = events.make_logger(run_id)
+        with tempfile.TemporaryDirectory() as tmp:
+            text = youtube_dl.download_subtitles(
+                urls[index], Path(tmp), lang=(lang or "en").strip(), on_log=log)
+        return {"text": text, "available": bool(text.strip())}
 
     @app.delete("/api/runs/{run_id}/references/{index}")
     def delete_reference(run_id: str, index: int):

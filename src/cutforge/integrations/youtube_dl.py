@@ -8,6 +8,7 @@ yt-dlp locates on PATH if present).
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -70,7 +71,85 @@ def download(url: str, dest: Path, *, on_log=None) -> dict:
     return meta
 
 
-def download_audio(url: str, dest: Path, *, audio_format: str = "mp3", on_log=None) -> dict:
+# --- Manual (channel-authored) subtitle download -------------------------------------
+
+_VTT_TIMING = re.compile(r"^\d{2}:\d{2}:\d{2}[.,]\d{3}\s*-->")
+_VTT_CUE_INDEX = re.compile(r"^\d+$")
+# Inline cue tags: <c>, </c>, <c.colorXXXX>, karaoke timestamps like <00:00:01.234>.
+_VTT_INLINE_TAG = re.compile(r"</?c[^>]*>|<\d{2}:\d{2}:\d{2}[.,]\d{3}>")
+
+
+def _vtt_to_text(vtt: str) -> str:
+    """Strip a WebVTT subtitle file down to plain lyric text.
+
+    Removes the ``WEBVTT`` header, ``NOTE``/``STYLE`` blocks, numeric cue indices,
+    ``HH:MM:SS.mmm --> …`` timing lines and inline cue tags. Animated/karaoke captions
+    repeat the same line across overlapping cues, so consecutive identical lines are
+    collapsed (conservative: only *adjacent* exact duplicates, leaving a genuinely
+    repeated chorus line elsewhere intact).
+    """
+    lines: list[str] = []
+    for raw in vtt.splitlines():
+        line = raw.strip()
+        if not line:
+            continue
+        if line.startswith("WEBVTT") or line.startswith("NOTE") or line.startswith("STYLE"):
+            continue
+        if "-->" in line and _VTT_TIMING.match(line):
+            continue
+        if _VTT_CUE_INDEX.match(line):
+            continue
+        line = _VTT_INLINE_TAG.sub("", line).strip()
+        if not line:
+            continue
+        # Collapse consecutive exact repeats (animated-caption artifact).
+        if lines and lines[-1] == line:
+            continue
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def download_subtitles(url: str, out_dir: Path, *, lang: str = "en", on_log=None) -> str:
+    """Download ONLY the channel's manual subtitles for ``url`` in ``lang``; return plain text.
+
+    Deliberately passes ``--write-subs`` WITHOUT ``--write-auto-subs``: YouTube's automatic
+    captions are ASR-quality (the same problem Whisper has), whereas manual subs are the
+    channel's own — usually the correct lyrics. Downloads no media (``--skip-download``).
+
+    Returns the cleaned, dedup'd transcript, or ``""`` when the video has no manual
+    subtitles in the requested language.
+    """
+    log = on_log or (lambda _m: None)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_template = str(out_dir / "%(id)s.%(ext)s")
+    cmd = YT_DLP + [
+        "--write-subs",
+        "--skip-download",
+        "--no-playlist",
+        "--sub-langs", lang,
+        "--sub-format", "vtt",
+        "-o", out_template,
+        "--newline",
+        url,
+    ]
+    log(f"Fetching manual subtitles ({lang})…")
+    process = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding="utf-8", errors="replace",
+    )
+    for line in process.stdout:
+        line = line.rstrip()
+        if line:
+            log(line)
+    process.wait()
+    # A missing manual sub is not an error here — yt-dlp just writes nothing.
+    vtt_files = sorted(out_dir.glob("*.vtt"))
+    if not vtt_files:
+        log(f"No manual subtitles found for language '{lang}'.")
+        return ""
+    text = _vtt_to_text(vtt_files[0].read_text(encoding="utf-8", errors="replace"))
+    log(f"Manual subtitles parsed: {len(text.splitlines())} lines.")
+    return text
     """Download audio-only from ``url``, transcode to ``audio_format``, save to ``dest``.
 
     Uses yt-dlp's extract-audio postprocessor (requires ffmpeg on PATH, same implicit
