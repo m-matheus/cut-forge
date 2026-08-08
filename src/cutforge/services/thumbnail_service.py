@@ -1,67 +1,120 @@
 """Thumbnail service — music-video thumbnail via the OpenAI Responses API.
 
-MUSIC_BASELINE ported from the old ``generate_thumbnail.py``: the character is the hero,
-album-cover energy, background carries the song's vibe. Fully AI-generated in one shot
-(no PIL compositing) — resized/cropped to 1280x720 for YouTube.
+Two stages:
+  1. A cheap Claude text call (``_analyze_visual``) turns the free-text character/anime/mood
+     into concrete visual attributes (expression, iconic prop, eye treatment, colors...).
+     This is what lets ONE prompt template serve ANY character without hard-coding a look.
+  2. ``openai_images.generate_image`` renders the 16:9 thumbnail from a prompt built out of
+     the shared MUSIC_BASELINE ("thumbnail DNA") + those per-character attributes.
+
+MUSIC_BASELINE is the fixed visual language of high-CTR anime rap thumbnails (Sensei Beats,
+Rustage, 7 Minutoz, Ishida Music): oversized front-facing face, glowing eyes, one iconic
+gesture, explosive neon background, extreme contrast — readable at small thumbnail size.
+Fully AI-generated in one shot (no PIL compositing) — resized/cropped to 1280x720.
 """
 from __future__ import annotations
 
-from cutforge.integrations import openai_images
+from cutforge.integrations import anthropic_client, openai_images
 from cutforge.models.project import VideoProject
 
 MUSIC_BASELINE = """
-Create a high-CTR anime music video thumbnail. Study how top channels (Sensei Beats,
-Rustage, 7 Minutoz, Ishida Music) design their thumbnails — this is the benchmark.
+Create a high-CTR YouTube anime rap thumbnail, designed to be instantly recognizable at a
+small mobile thumbnail size (readable even at ~160px wide). This is NOT a wallpaper or a
+generic key-art illustration — it is an aggressive, click-winning YouTube thumbnail. Study
+how top channels (Sensei Beats, Rustage, 7 Minutoz, Ishida Music) design theirs.
 
-ART STYLE (critical):
-Clean, ultra-detailed 2D anime illustration. Sharp outlines, cel-shading with dramatic
-lighting. NOT 3D render, NOT realistic, NOT photorealistic. The quality must match
-professional anime key art — like an official illustration from the anime studio itself,
-but with maximum cinematic energy.
+ART STYLE:
+Clean, ultra-detailed 2D anime illustration with sharp confident linework and cel-shading.
+NOT 3D, NOT CGI, NOT photorealistic.
 
-CHARACTER (primary focus):
-The featured character fills 70-80% of the frame. Close shot: face, neck, and upper
-chest visible. The face must be FRONT-FACING or at a slight dramatic angle toward the
-viewer — eyes must make direct, intense contact with the camera. Render the character
-in their most powerful, iconic form with their exact signature costume and accessories.
-Expression: powerful and iconic, matching both the character's personality and the
-song's mood — whether that's an arrogant smirk, stoic intensity, fierce determination,
-sorrowful resolve, or a battle-ready glare. Let the character's nature guide the face.
-Eyes are vivid and expressive; if the character has a signature power or energy color,
-their eyes should reflect or glow with it.
+CHARACTER (the whole point of the image):
+ONE character, extreme close-up portrait — the face and upper chest fill roughly 80% of the
+frame. Front-facing or a slight dramatic three-quarter angle, eyes locked on the viewer. The
+full face stays inside the frame; never crop the eyes. Avoid full-body or distant shots.
+Render the character's exact canonical design — do not redesign them.
 
-LIGHTING (critical):
-Extreme rim/edge lighting outlines the character in their signature power color, as if
-their body emits energy. The character glows. Face lit dramatically from below or the
-side. Strong contrast between the lit face and the character's outfit silhouette.
+LIGHTING:
+Extreme rim/edge lighting in the character's signature color, as if the body emits energy.
+The character glows; deep shadows against very bright highlights; strong separation from the
+background.
 
-BACKGROUND (secondary, supporting):
-Two-tone or split-color background preferred — two contrasting colors drawn from the
-character's own palette, divided diagonally or with an energy explosion at the center.
-Add energy particles, lightning bolts, speed lines, or abstract power bursts that match
-the character's abilities or the song's mood. Background MUST NOT compete with the
-character — use a strong vignette/dark blur toward the edges.
+BACKGROUND (supporting, never competing):
+Abstract high-energy field — a two-tone color split, energy explosion, lightning, particles
+or aura. Keep the area right behind the face relatively clean and use a dark vignette toward
+the edges so the face and eyes stay the clear focal point. No literal scenes or locations.
 
 COLOR GRADING:
-Hyper-saturated, electric, neon-level vibrancy. Maximum contrast. Colors must look
-almost unrealistically vivid — like a phone wallpaper people stop to stare at. Pick the
-character's two most iconic colors and use them as the dominant palette.
-
-COMPOSITION:
-Album cover energy. The character commands the frame with an aura that fully matches
-the song's mood and their own personality. Every pixel should make the viewer stop
-scrolling.
+Hyper-saturated, electric, neon-level vibrancy with maximum contrast — colors almost
+unrealistically vivid, the kind of image people stop scrolling for.
 
 NO watermarks, NO channel logos, NO character names, NO text on the image.
 Only include a genre badge if one is specified below.
 """.strip()
 
+VISUAL_ANALYSIS_SYSTEM_PROMPT = """\
+You are an art director for an anime rap / music YouTube channel. Given a character, their
+anime and the song's mood, decide the concrete visual choices for a high-CTR thumbnail so the
+image is instantly recognizable AND matches the song's energy. Base every choice on the
+character's real canonical design — never invent features.
 
-def _build_request(project: VideoProject, genre_badge: str | None) -> str:
+Return a single valid JSON object. No markdown fences, no commentary.
+{
+  "expression": "one short phrase — the facial expression, chosen to fit BOTH the character's personality and the song's mood (e.g. arrogant smirk, stoic glare, sorrowful resolve, manic grin)",
+  "iconic_gesture": "one simple, instantly recognizable gesture or prop tied to this character (e.g. 'adjusting round sunglasses', 'hand wreathed in cursed energy near the face'), or 'none' if the character has no signature gesture — do NOT force one",
+  "eye_treatment": "eye color and any signature glow/effect (e.g. 'glowing electric-cyan eyes', 'red Sharingan')",
+  "signature_features": "the must-keep canonical identity cues: hairstyle & color, outfit, accessories",
+  "dominant_colors": ["2-3 colors, most dominant first — the character's signature palette rendered as electric/neon versions"],
+  "energy_motif": "the background energy tied to this character's power or the song mood (e.g. 'violet cursed-energy explosion', 'blue lightning')"
+}
+"""
+
+_LANG_NOTE = "Keep all values in English (they are image-prompt fragments, not shown to viewers)."
+
+
+def _analyze_visual(project: VideoProject, *, on_log=None) -> dict:
+    """Ask Claude for concrete per-character visual attributes. Returns {} on any failure."""
+    user_prompt = (
+        f"Character(s): {project.character}\n"
+        f"Anime / Series: {project.anime or 'unknown'}\n"
+        f"Song mood: {project.mood or 'dark, powerful, cinematic'}\n\n"
+        f"{_LANG_NOTE} Return only valid JSON."
+    )
+    try:
+        data = anthropic_client.complete_json(VISUAL_ANALYSIS_SYSTEM_PROMPT, user_prompt)
+    except Exception as exc:  # analysis is an enhancement — never block the thumbnail on it
+        if on_log:
+            on_log(f"Visual analysis skipped ({exc}); using baseline prompt.")
+        return {}
+    if on_log and data.get("expression"):
+        on_log(f"Visual direction: {data.get('expression')} · {', '.join(data.get('dominant_colors', []))}")
+    return data
+
+
+def _analysis_block(data: dict) -> str:
+    """Render the analysis dict into an image-prompt section (empty string if no data)."""
+    lines = []
+    if data.get("expression"):
+        lines.append(f"Expression: {data['expression']}.")
+    gesture = data.get("iconic_gesture", "").strip()
+    if gesture and gesture.lower() != "none":
+        lines.append(f"Iconic gesture / prop: {gesture} — keep it simple and large.")
+    if data.get("eye_treatment"):
+        lines.append(f"Eyes: {data['eye_treatment']}.")
+    if data.get("signature_features"):
+        lines.append(f"Keep canonical: {data['signature_features']}.")
+    if data.get("dominant_colors"):
+        lines.append(f"Dominant palette (in order): {', '.join(data['dominant_colors'])}.")
+    if data.get("energy_motif"):
+        lines.append(f"Background energy: {data['energy_motif']}.")
+    if not lines:
+        return ""
+    return "CHARACTER VISUAL DIRECTION (follow exactly):\n" + "\n".join(lines)
+
+
+def _build_request(project: VideoProject, genre_badge: str | None,
+                   analysis: dict | None = None) -> str:
     sections = [
-        ("Featured character(s) — render their exact canonical design (hair, eyes, "
-         "outfit, accessories — do NOT change or omit any signature feature)",
-         project.character),
+        ("Featured character(s)", project.character),
         ("Anime / Series", project.anime),
         ("Song vibe / mood", project.mood or "dark, powerful, cinematic"),
     ]
@@ -76,18 +129,11 @@ def _build_request(project: VideoProject, genre_badge: str | None) -> str:
             f"bottom-left edges."
         )
 
-    palette_hint = (
-        f"The character's signature colors and {project.anime}'s official color palette "
-        f"should dominate the composition — use neon/electric versions of those exact colors."
-        if project.anime else
-        "Use hyper-saturated, neon/electric versions of the character's signature colors."
-    )
-
     return "\n\n".join(filter(None, [
         "Create a thumbnail for an anime music video (character key art, album-cover energy).",
         context,
+        _analysis_block(analysis or {}),
         MUSIC_BASELINE,
-        palette_hint,
         badge_block,
     ])).strip()
 
@@ -98,7 +144,8 @@ def generate_thumbnail(project: VideoProject, *, genre_badge: str | None = None,
     if not project.character:
         raise ValueError("Thumbnail needs a character — set it on the project first.")
 
-    request = _build_request(project, genre_badge)
+    analysis = _analyze_visual(project, on_log=on_log)
+    request = _build_request(project, genre_badge, analysis)
     raw_path = project.thumbnail_dir / "raw.png"
     openai_images.generate_image(request, raw_path, portrait=False, on_log=on_log)
 
