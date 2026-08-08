@@ -179,6 +179,12 @@ class VideoProject(BaseModel):
         # The original-song brief produced before lyrics are written.
         return self.run_dir / "creative_direction.json"
 
+    @property
+    def narrative_structure_path(self) -> Path:
+        # The proven story skeleton synthesized from the reference(s) — "follow structure"
+        # mode only. One blueprint per run (not per-reference).
+        return self.run_dir / "narrative_structure.json"
+
     # --- Persistence ---
     def save(self) -> None:
         self.run_dir.mkdir(parents=True, exist_ok=True)

@@ -27,12 +27,18 @@ def _reconstruct_lyrics(words: list[dict]) -> str:
 
 
 def analyze_reference(project: VideoProject, url: str, index: int = 0,
-                      *, refresh: bool = False, on_log=None) -> dict:
+                      *, refresh: bool = False, manual_lyrics: str = "", on_log=None) -> dict:
     """Download, transcribe and rhythm-analyze one reference rap. Returns the profile.
 
     ``index`` selects the sub-folder (0 = primary, 1 = second reference, …).
     The result is written to ``reference/{index}/reference_profile.json``.
     ``project.reference_urls`` is updated and saved.
+
+    ``manual_lyrics``: when non-empty, these lyrics are used verbatim as the reference
+    transcript and Whisper transcription is skipped entirely. Whisper only runs as a
+    fallback when no manual lyrics are supplied (its rap transcription is unreliable).
+    The audio is still downloaded and rhythm-analyzed either way — BPM/flow come from
+    librosa, not Whisper.
     """
     log = on_log or (lambda _m: None)
 
@@ -46,28 +52,37 @@ def analyze_reference(project: VideoProject, url: str, index: int = 0,
 
     meta = youtube_dl.download_audio(url, audio_path, on_log=log)
 
-    words = stable_whisper_client.transcribe_words(
-        audio_path,
-        cache_path=whisper_path,
-        refresh=refresh,
-        language=None,
-        on_log=log,
-    )
-    transcript = _reconstruct_lyrics(words)
-    lyrics_path.write_text(transcript, encoding="utf-8")
-
     rhythm = librosa_client.analyze_rhythm(
         audio_path,
         cache_path=rhythm_path,
         refresh=refresh,
         on_log=log,
     )
-
     bpm = rhythm.get("bpm", 0) or 0
-    word_count = len(words)
-    span = 0.0
-    if words:
-        span = max(0.0, float(words[-1]["end"]) - float(words[0]["start"]))
+
+    manual_lyrics = (manual_lyrics or "").strip()
+    if manual_lyrics:
+        log(f"Reference {index}: using pasted lyrics ({len(manual_lyrics.split())} words) — skipping Whisper.")
+        transcript = manual_lyrics
+        lyrics_path.write_text(transcript, encoding="utf-8")
+        word_count = len(transcript.split())
+        # No word-level timings without Whisper — estimate flow from duration + BPM.
+        span = float(rhythm.get("duration_sec") or 0.0)
+    else:
+        words = stable_whisper_client.transcribe_words(
+            audio_path,
+            cache_path=whisper_path,
+            refresh=refresh,
+            language=None,
+            on_log=log,
+        )
+        transcript = _reconstruct_lyrics(words)
+        lyrics_path.write_text(transcript, encoding="utf-8")
+        word_count = len(words)
+        span = 0.0
+        if words:
+            span = max(0.0, float(words[-1]["end"]) - float(words[0]["start"]))
+
     words_per_sec = round(word_count / span, 2) if span > 0 else 0.0
     syllables_per_beat = round(words_per_sec * 60.0 / bpm, 2) if bpm > 0 else 0.0
 
@@ -84,6 +99,7 @@ def analyze_reference(project: VideoProject, url: str, index: int = 0,
             "syllables_per_beat": syllables_per_beat,
         },
         "transcript": transcript,
+        "lyrics_source": "manual" if manual_lyrics else "whisper",
     }
 
     profile_path.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
@@ -129,8 +145,62 @@ def load_all_reference_profiles(project: VideoProject) -> list[dict]:
     return profiles
 
 
+def set_reference_lyrics(project: VideoProject, index: int, lyrics: str,
+                         *, on_log=None) -> dict | None:
+    """Overwrite one already-analyzed reference's transcript with manually-pasted lyrics.
+
+    Use this to correct Whisper's mistranscription without re-downloading or re-analyzing
+    the audio. Recomputes flow from the new word count against the cached duration/BPM,
+    updates ``reference_lyrics.txt`` and the profile, and invalidates the derived caches
+    (per-reference lore and the per-run narrative structure) so they re-mine from the
+    corrected text on next use. Returns the updated profile, or None if the reference
+    hasn't been analyzed yet.
+    """
+    log = on_log or (lambda _m: None)
+
+    profile = load_reference_profile(project, index)
+    if profile is None:
+        return None
+
+    lyrics = (lyrics or "").strip()
+    profile_path = project.ref_profile_path(index)
+    lyrics_path = project.ref_lyrics_path(index)
+
+    profile["transcript"] = lyrics
+    profile["lyrics_source"] = "manual"
+
+    word_count = len(lyrics.split())
+    bpm = profile.get("bpm", 0) or 0
+    span = float(profile.get("duration_sec") or 0.0)
+    words_per_sec = round(word_count / span, 2) if span > 0 else 0.0
+    syllables_per_beat = round(words_per_sec * 60.0 / bpm, 2) if bpm > 0 else 0.0
+    profile["flow"] = {
+        "word_count": word_count,
+        "words_per_sec": words_per_sec,
+        "syllables_per_beat": syllables_per_beat,
+    }
+
+    lyrics_path.parent.mkdir(parents=True, exist_ok=True)
+    lyrics_path.write_text(lyrics, encoding="utf-8")
+    profile_path.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    # The lore and the shared narrative structure were mined from the old transcript.
+    lore_path = project.ref_lore_profile_path(index)
+    if lore_path.exists():
+        lore_path.unlink()
+    if project.narrative_structure_path.exists():
+        project.narrative_structure_path.unlink()
+
+    log(f"Reference {index} lyrics updated: {word_count} words. Lore/structure caches cleared.")
+    return profile
+
+
 def remove_reference(project: VideoProject, index: int) -> None:
-    """Remove one reference: delete its sub-folder and update project.reference_urls."""
+    """Remove one reference: delete its sub-folder and update project.reference_urls.
+
+    Also invalidates the per-run narrative structure blueprint, since the shared skeleton
+    was synthesized from the (now changed) set of references and would be stale.
+    """
     import shutil
     ref_dir = project.ref_dir(index)
     if ref_dir.exists():
@@ -140,3 +210,7 @@ def remove_reference(project: VideoProject, index: int) -> None:
         urls.pop(index)
     project.reference_urls = urls
     project.save()
+
+    # The narrative structure is a cross-reference synthesis — stale once refs change.
+    if project.narrative_structure_path.exists():
+        project.narrative_structure_path.unlink()

@@ -59,7 +59,8 @@ def _execute(step_id: str, project: VideoProject, params: dict, log: LogFn):
             raise ValueError("Missing 'url' for reference analysis.")
         index = int(params.get("index", 0))
         profile = reference_service.analyze_reference(
-            project, url, index, refresh=params.get("refresh", False), on_log=log)
+            project, url, index, refresh=params.get("refresh", False),
+            manual_lyrics=params.get("lyrics", ""), on_log=log)
         return {"bpm": profile.get("bpm"), "title": profile.get("source_title"), "index": index}
 
     if step_id == "lyrics":
@@ -69,6 +70,7 @@ def _execute(step_id: str, project: VideoProject, params: dict, log: LogFn):
         pkg = song_service.generate_package(
             project, genre, is_vs=params.get("is_vs", False),
             ref_index=int(params.get("ref_index", 0)),
+            follow_structure=params.get("follow_structure", False),
             refresh=params.get("refresh", False), on_log=log)
         log(f"Song: {pkg.title}")
         return {"title": pkg.title, "style": pkg.style}

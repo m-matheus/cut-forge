@@ -42,17 +42,33 @@
                 <template x-if="referenceProfiles.length > 0">
                   <div style="margin-bottom:.75rem">
                     <template x-for="ref in referenceProfiles" :key="ref.index">
-                      <div class="output-block" style="display:flex;align-items:center;gap:.5rem;margin-bottom:.4rem;padding:.5rem .75rem">
-                        <span style="font-size:.7rem;opacity:.5" x-text="`#${ref.index + 1}`"></span>
-                        <div style="flex:1;min-width:0">
-                          <strong style="font-size:.85rem" x-text="ref.source_title || ref.source_url"></strong>
-                          <span class="muted" style="font-size:.75rem;margin-left:.4rem" x-text="ref.bpm ? ref.bpm + ' BPM' : ''"></span>
-                          <template x-if="ref.index === 0">
-                            <span style="font-size:.7rem;margin-left:.4rem;opacity:.6">(som primário)</span>
-                          </template>
+                      <div class="output-block" style="margin-bottom:.4rem;padding:.5rem .75rem">
+                        <div style="display:flex;align-items:center;gap:.5rem">
+                          <span style="font-size:.7rem;opacity:.5" x-text="`#${ref.index + 1}`"></span>
+                          <div style="flex:1;min-width:0">
+                            <strong style="font-size:.85rem" x-text="ref.source_title || ref.source_url"></strong>
+                            <span class="muted" style="font-size:.75rem;margin-left:.4rem" x-text="ref.bpm ? ref.bpm + ' BPM' : ''"></span>
+                            <template x-if="ref.index === 0">
+                              <span style="font-size:.7rem;margin-left:.4rem;opacity:.6">(som primário)</span>
+                            </template>
+                            <span style="font-size:.65rem;margin-left:.4rem;padding:.1rem .35rem;border-radius:.25rem"
+                                  :style="ref.lyrics_source === 'manual' ? 'background:rgba(80,200,120,.18);color:#5c9' : 'background:rgba(255,255,255,.08);opacity:.6'"
+                                  x-text="ref.lyrics_source === 'manual' ? 'letra colada' : 'via Whisper'"></span>
+                          </div>
+                          <button class="secondary outline" style="padding:.2rem .5rem;font-size:.75rem"
+                                  @click="removeReference(ref.index)" :disabled="running">✕</button>
                         </div>
-                        <button class="secondary outline" style="padding:.2rem .5rem;font-size:.75rem"
-                                @click="removeReference(ref.index)" :disabled="running">✕</button>
+                        <details style="margin-top:.4rem">
+                          <summary style="font-size:.75rem;cursor:pointer;opacity:.75">Ver / corrigir letra</summary>
+                          <p style="margin:.4rem 0 .3rem"><small class="muted">O Whisper erra bastante em rap. Cole a letra correta aqui — ela será usada como transcrição (lore + estrutura re-extraem a partir dela).</small></p>
+                          <textarea rows="6" style="width:100%;font-size:.8rem" x-model="ref.transcript"
+                                    placeholder="Cole a letra correta desta referência…"></textarea>
+                          <button class="secondary outline copy-btn" style="margin-top:.35rem"
+                                  @click="saveReferenceLyrics(ref.index, ref.transcript)"
+                                  :aria-busy="busy.refLyrics === ref.index" :disabled="busy.refLyrics === ref.index">
+                            Salvar letra
+                          </button>
+                        </details>
                       </div>
                     </template>
                   </div>
@@ -68,6 +84,12 @@
                     <span x-text="referenceProfiles.length > 0 ? '+ Adicionar' : 'Analisar'"></span>
                   </button>
                 </div>
+                <details style="margin-top:.4rem">
+                  <summary style="font-size:.75rem;cursor:pointer;opacity:.75">Colar a letra manualmente (opcional)</summary>
+                  <p style="margin:.4rem 0 .3rem"><small class="muted">Se você já tem a letra (ex: da descrição do vídeo), cole aqui. O Whisper <strong>não</strong> roda quando há letra colada — só é usado como fallback.</small></p>
+                  <textarea rows="6" style="width:100%;font-size:.8rem" x-model="newReferenceLyrics"
+                            placeholder="Cole a letra da música de referência…"></textarea>
+                </details>
               </div>
             </template>
 
@@ -86,6 +108,19 @@
                   <template x-if="hasReference">
                     <p class="ok"><small>✓ Usando o rap de referência: o gênero, o BPM e o flow seguem a referência; a letra é uma composição 100% original (o lore do personagem é extraído da referência, mas a expressão é nova).</small></p>
                   </template>
+
+                  <!-- Follow-structure toggle (only meaningful with a reference) -->
+                  <template x-if="hasReference">
+                    <label class="genre-opt" style="display:flex;align-items:flex-start;gap:.5rem;cursor:pointer">
+                      <input type="checkbox" x-model="followStructure" style="margin-top:.2rem"
+                             @change="if (followStructure && !structureProfile) refreshStructure()">
+                      <span>
+                        <strong>Seguir a estrutura das referências</strong>
+                        <small class="muted" style="display:block">Reaproveita a fórmula comprovada (ordem dos beats, posição do gancho, arco) das músicas de referência — a letra continua 100% nova.</small>
+                      </span>
+                    </label>
+                  </template>
+
                   <button class="secondary outline" @click="suggestGenres()"
                           :aria-busy="busy.suggest" :disabled="busy.suggest">
                     Sugerir gêneros
@@ -113,6 +148,51 @@
                     </div>
                   </template>
                   <input placeholder="…ou cole um estilo Suno" x-model="chosenGenre">
+
+                  <!-- Narrative structure panel (follow-structure mode) -->
+                  <template x-if="followStructure && structureProfile">
+                    <details class="output-preview" open>
+                      <summary>Estrutura narrativa (esqueleto comprovado)</summary>
+                      <div class="output-block" style="font-size:.8rem">
+                        <div style="margin-bottom:.6rem">
+                          <textarea rows="2" x-model="structureInstruction" style="width:100%;font-size:.8rem"
+                                    placeholder="Instrução opcional p/ regenerar estrutura (ex: 'enfatize a virada de Shibuya no bridge', 'dê mais âncoras ao gancho')"></textarea>
+                          <button class="secondary outline copy-btn" style="margin-top:.35rem"
+                                  @click="refreshStructure()" :aria-busy="busy.structure" :disabled="busy.structure">
+                            Regenerar estrutura
+                          </button>
+                        </div>
+                        <template x-if="structureProfile.overall_shape">
+                          <p><strong>Formato geral:</strong> <span x-text="structureProfile.overall_shape"></span></p>
+                        </template>
+                        <template x-if="structureProfile.section_arrangement && structureProfile.section_arrangement.length">
+                          <p><strong>Arranjo:</strong> <span x-text="structureProfile.section_arrangement.join(' → ')"></span></p>
+                        </template>
+                        <template x-if="structureProfile.beats && structureProfile.beats.length">
+                          <div>
+                            <strong>Beats (ordem a seguir)</strong>
+                            <ol style="margin:.25rem 0 .5rem 1rem">
+                              <template x-for="b in structureProfile.beats" :key="b.order">
+                                <li><span x-text="`[${b.section} · ${b.function} · ${b.intensity}] ${b.beat}` + (b.maps_to_lore ? ` ← ${b.maps_to_lore}` : '')"></span></li>
+                              </template>
+                            </ol>
+                          </div>
+                        </template>
+                        <template x-if="structureProfile.hook_placement">
+                          <p><strong>Posição do gancho:</strong> <span x-text="structureProfile.hook_placement"></span></p>
+                        </template>
+                        <template x-if="structureProfile.emotional_arc">
+                          <p><strong>Arco emocional:</strong> <span x-text="structureProfile.emotional_arc"></span></p>
+                        </template>
+                        <template x-if="structureProfile.flow_cadence_notes">
+                          <p><strong>Flow / cadência:</strong> <span x-text="structureProfile.flow_cadence_notes"></span></p>
+                        </template>
+                        <template x-if="structureProfile.shared_pattern_notes">
+                          <p class="muted"><strong>Fórmula comum:</strong> <span x-text="structureProfile.shared_pattern_notes"></span></p>
+                        </template>
+                      </div>
+                    </details>
+                  </template>
 
                   <!-- Lore panel -->
                   <template x-if="loreProfile">
@@ -398,17 +478,21 @@ function wizard(runId, initialSteps, saved) {
     running: false,
     current: null,
     openStep: null,
-    busy: { suggest: false, lore: false, direction: false },
+    busy: { suggest: false, lore: false, direction: false, structure: false, refLyrics: null },
     genres: [],
     chosenGenre: '',
     chosenRefIndex: 0,
     loreProfile: null,
     creativeDirection: null,
+    structureProfile: null,
     loreInstruction: '',
     directionInstruction: '',
+    structureInstruction: '',
+    followStructure: false,
     footageUrl: saved.footageUrl || '',
     referenceUrls: saved.referenceUrls || [],
     newReferenceUrl: '',
+    newReferenceLyrics: '',
     referenceProfiles: [],
     genreBadge: '',
     trackUploaded: false,
@@ -493,6 +577,8 @@ function wizard(runId, initialSteps, saved) {
       if (lr.ok) this.loreProfile = await lr.json();
       const cr = await fetch(`/api/runs/${this.runId}/creative-direction`);
       if (cr.ok) this.creativeDirection = await cr.json();
+      const sr = await fetch(`/api/runs/${this.runId}/structure-profile`);
+      if (sr.ok) { this.structureProfile = await sr.json(); this.followStructure = true; }
     },
 
     async suggestGenres() {
@@ -536,12 +622,47 @@ function wizard(runId, initialSteps, saved) {
       } finally { this.busy.direction = false; }
     },
 
+    async refreshStructure() {
+      this.busy.structure = true;
+      try {
+        const r = await fetch(`/api/runs/${this.runId}/structure-profile/refresh`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ instruction: this.structureInstruction.trim() }),
+        });
+        if (r.ok) {
+          this.structureProfile = await r.json();
+          this.structureInstruction = '';
+          this.followStructure = true;
+        } else {
+          alert('Nenhuma referência para analisar. Adicione ao menos um rap de referência primeiro.');
+        }
+      } finally { this.busy.structure = false; }
+    },
+
     async addReference() {
       const url = this.newReferenceUrl.trim();
       if (!url) return;
       const index = this.referenceUrls.length;
+      const lyrics = this.newReferenceLyrics.trim();
       this.newReferenceUrl = '';
-      await this.runStep('reference', { url, index });
+      this.newReferenceLyrics = '';
+      await this.runStep('reference', { url, index, lyrics });
+    },
+
+    async saveReferenceLyrics(index, lyrics) {
+      this.busy.refLyrics = index;
+      try {
+        const r = await fetch(`/api/runs/${this.runId}/references/${index}/lyrics`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ lyrics: (lyrics || '').trim() }),
+        });
+        if (!r.ok) { alert('Não foi possível salvar a letra desta referência.'); return; }
+        // Lore/structure caches were invalidated server-side; refresh local views.
+        this.structureProfile = null;
+        await this.loadOutputs();
+      } finally { this.busy.refLyrics = null; }
     },
 
     async removeReference(index) {
@@ -570,7 +691,7 @@ function wizard(runId, initialSteps, saved) {
         : 'Gerar letra chama a API Anthropic.';
       if (!confirm(msg + '\n\nContinuar?')) return;
       this.lyricsOutput = {};
-      this.runStep('lyrics', { genre: this.chosenGenre, ref_index: this.chosenRefIndex }, regenerating);
+      this.runStep('lyrics', { genre: this.chosenGenre, ref_index: this.chosenRefIndex, follow_structure: this.followStructure }, regenerating);
     },
 
     async runStep(stepId, params, force) {

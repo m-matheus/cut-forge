@@ -27,6 +27,7 @@ from cutforge.models.song import (
     GenreSuggestions,
     SongPackage,
 )
+from cutforge.models.structure import NarrativeStructureProfile
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +157,31 @@ about the same character in a similar sonic lane — never as a version of the r
 """
 
 
+_STRUCTURE_FOLLOW_RULES = """\
+FOLLOW THE PROVEN STRUCTURE — WITH 100% ORIGINAL EXPRESSION
+This song deliberately FOLLOWS a proven narrative skeleton reverse-engineered from
+reference songs about this character (the NARRATIVE STRUCTURE block below). Many
+successful channels reuse the same formula — same story beats, same order, hook in the
+same place, same emotional arc — changing only the words. You are doing exactly that.
+
+DO:
+- follow the skeleton's beat ORDER, section arrangement, hook placement and emotional arc;
+- honour the intensity/cadence shape (where the energy and density rise and fall);
+- fill each beat with the KIND of lore its slot calls for, using the mined lore below;
+- write EVERY line, rhyme, metaphor and the hook WORDING from scratch — 100% original.
+
+DO NOT:
+- copy, paraphrase or translate any words, phrases, punchlines or hook wording from the
+  reference — you never saw its lyrics, only its SHAPE;
+- reuse the reference's specific metaphors or imagery;
+- intentionally reproduce its rhyme scheme.
+
+The test: same skeleton, brand-new words. A listener who knows the references should
+recognise the STRUCTURE but hear nothing lifted — every line is your own.
+"""
+
+
+
 # ---------------------------------------------------------------------------
 # Lore + creative-direction prompt formatting
 # ---------------------------------------------------------------------------
@@ -228,6 +254,34 @@ def _format_direction_for_prompt(direction: CreativeDirection) -> str:
         parts.append(f"- Delivery personality: {direction.delivery_personality}")
     if direction.things_to_avoid:
         parts.append("- Things to avoid: " + "; ".join(direction.things_to_avoid))
+    return "\n".join(parts)
+
+
+def _format_structure_for_prompt(structure: NarrativeStructureProfile) -> str:
+    """Render the narrative skeleton as a writer-facing block — SHAPE only, no phrasing."""
+    parts = [
+        "NARRATIVE STRUCTURE (the PROVEN skeleton to FOLLOW — this is SHAPE, not lyrics. "
+        "Follow the beat order/arrangement/arc/hook placement, but invent ALL wording).",
+    ]
+    if structure.overall_shape:
+        parts.append(f"- Overall shape: {structure.overall_shape}")
+    if structure.section_arrangement:
+        parts.append("- Section arrangement: " + " → ".join(structure.section_arrangement))
+    if structure.beats:
+        parts.append("- Story beats (follow this order; fill each with your own words):")
+        for b in sorted(structure.beats, key=lambda x: x.order):
+            slot = f" ← fill with: {b.maps_to_lore}" if b.maps_to_lore else ""
+            parts.append(
+                f"    {b.order}. [{b.section} · {b.function} · {b.intensity}] {b.beat}{slot}"
+            )
+    if structure.hook_placement:
+        parts.append(f"- Hook placement: {structure.hook_placement}")
+    if structure.emotional_arc:
+        parts.append(f"- Emotional arc: {structure.emotional_arc}")
+    if structure.flow_cadence_notes:
+        parts.append(f"- Flow / cadence: {structure.flow_cadence_notes}")
+    if structure.shared_pattern_notes:
+        parts.append(f"- Proven-formula notes: {structure.shared_pattern_notes}")
     return "\n".join(parts)
 
 
@@ -310,14 +364,32 @@ OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
 Return ONLY the JSON object.
 """
 
-GENERATE_SYSTEM_PROMPT_BASE = f"""\
-You are an expert songwriter and music producer for an anime-rap channel in the lane
-of BASARA, M4RKIM, ANIRAP, Rustage and 7 Minutoz. You write a COMPLETELY ORIGINAL song
-about a specific anime character (or matchup) that will be generated on Suno AI.
-
+GENERATE_INTRO_ORIGINAL = """\
 You are writing a completely original song. When a reference exists, it gives you ONLY
 the sonic world (genre/BPM/energy) and a list of extracted character facts — you never
-saw its lyrics and you never reproduce its expression.
+saw its lyrics and you never reproduce its expression."""
+
+GENERATE_INTRO_STRUCTURE = """\
+You are writing an original song that deliberately FOLLOWS a proven narrative skeleton
+extracted from reference songs about this character. The reference gives you three things:
+the sonic world (genre/BPM/energy), a list of extracted character facts, and the STORY
+STRUCTURE to follow. You write EVERY word yourself — you never saw the reference's lyrics
+and you never reproduce its expression; you follow only its SHAPE."""
+
+
+def _build_generate_base(rules_block: str, *, intro: str) -> str:
+    """Assemble the GENERATE base system prompt from a mode intro + a rules block.
+
+    ``intro`` is the framing paragraph (original vs. follow-structure) and ``rules_block``
+    is either ``_ORIGINALITY_RULES`` (max-originality mode) or ``_STRUCTURE_FOLLOW_RULES``
+    (follow-structure mode). Everything else (Suno craft rules, output format) is shared.
+    """
+    return f"""\
+You are an expert songwriter and music producer for an anime-rap channel in the lane
+of BASARA, M4RKIM, ANIRAP, Rustage and 7 Minutoz. You write a compelling song
+about a specific anime character (or matchup) that will be generated on Suno AI.
+
+{intro}
 
 You know exactly how Suno reads its Style and Lyrics fields and you exploit that to
 get a clean, on-genre track — not generic mush.
@@ -327,7 +399,7 @@ TWO AXES — keep them separate:
   LYRICAL IDENTITY → the ORIGINAL composition: character attitude, powers, arc, delivery,
                      following the CREATIVE DIRECTION brief and the mined lore.
 
-{_ORIGINALITY_RULES}
+{rules_block}
 
 {_SUNO_STYLE_RULES}
 
@@ -374,11 +446,28 @@ OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
 }}
 """
 
+
+GENERATE_SYSTEM_PROMPT_BASE = _build_generate_base(
+    _ORIGINALITY_RULES, intro=GENERATE_INTRO_ORIGINAL
+)
+
+# Follow-structure mode base — same Suno craft, but the originality block is replaced by
+# the structure-follow rules and the intro reframed around following the skeleton.
+GENERATE_SYSTEM_PROMPT_STRUCTURE_BASE = _build_generate_base(
+    _STRUCTURE_FOLLOW_RULES, intro=GENERATE_INTRO_STRUCTURE
+)
+
 GENERATE_SYSTEM_PROMPT_NO_REF = GENERATE_SYSTEM_PROMPT_BASE + f"""
 {_ARCHETYPE_RANGE_NO_REF}
 """
 
 GENERATE_SYSTEM_PROMPT_WITH_REF = GENERATE_SYSTEM_PROMPT_BASE + f"""
+{_REFERENCE_SONIC_RULES}
+"""
+
+# Follow-structure mode always needs a reference (there is no skeleton without one), so
+# there is only a WITH_REF variant.
+GENERATE_SYSTEM_PROMPT_STRUCTURE_WITH_REF = GENERATE_SYSTEM_PROMPT_STRUCTURE_BASE + f"""
 {_REFERENCE_SONIC_RULES}
 """
 
@@ -501,6 +590,7 @@ def plan_creative_direction(
     *,
     music_profile: dict | None = None,
     lore_profile: ReferenceLoreProfile | None = None,
+    structure_profile: NarrativeStructureProfile | None = None,
     is_vs: bool = False,
     user_instruction: str = "",
     refresh: bool = False,
@@ -512,6 +602,10 @@ def plan_creative_direction(
     lyrics step does not re-plan unless ``refresh=True``. ``user_instruction`` is an
     optional free-text steering note (used when regenerating) — it is injected into the
     prompt but never persisted onto the model.
+
+    ``structure_profile`` (follow-structure mode) is fed as a FIXED-shape constraint: the
+    arc/arrangement/hook placement come from the proven skeleton, so the brief designs
+    fresh CONTENT within that shape instead of fighting it.
     """
     if project.creative_direction_path.exists() and not refresh:
         data = json.loads(project.creative_direction_path.read_text(encoding="utf-8"))
@@ -545,6 +639,17 @@ def plan_creative_direction(
     if lore_profile and not lore_profile.is_empty():
         lines += ["", _format_lore_for_prompt(lore_profile)]
 
+    if structure_profile and not structure_profile.is_empty():
+        lines += [
+            "",
+            _format_structure_for_prompt(structure_profile),
+            "",
+            "IMPORTANT: the emotional arc, section arrangement and hook placement are "
+            "FIXED by this proven skeleton. Design a fresh core theme, narrative angle, "
+            "metaphor world and hook CONCEPT that live WITHIN this shape — do not fight "
+            "the structure. Your emotional_arc must be compatible with the skeleton's.",
+        ]
+
     lines += [
         "",
         "Design the brief for a NEW original song. Return only valid JSON.",
@@ -564,19 +669,25 @@ def plan_creative_direction(
 def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
                      reference_profile: dict | None = None,
                      ref_index: int = 0,
+                     follow_structure: bool = False,
                      user_instruction: str = "",
                      refresh: bool = False,
                      refresh_lore: bool = False,
+                     refresh_structure: bool = False,
                      on_log=None,
                      **_ignored) -> SongPackage:
     """Generate the full Suno package and write lyrics.txt + suno_prompt.json.
 
     ``ref_index`` selects which reference provides the sonic DNA (BPM/flow/style).
     All available references contribute lore (merged and deduplicated).
-    ``refresh`` re-plans the creative direction; ``refresh_lore`` re-mines all lore.
+    ``follow_structure`` switches to "follow structure" mode: the song follows the proven
+    narrative skeleton synthesized from the reference(s) while keeping 100% original
+    wording. It needs at least one reference; with none it falls back to the normal path.
+    ``refresh`` re-plans the creative direction; ``refresh_lore`` re-mines all lore;
+    ``refresh_structure`` re-extracts the narrative structure.
     ``user_instruction`` optionally steers the creative-direction re-plan.
     """
-    from cutforge.services import lore_service, reference_service
+    from cutforge.services import lore_service, reference_service, structure_service
 
     log = on_log or (lambda _m: None)
 
@@ -596,9 +707,21 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
                 individual_lores.append(lp)
         lore_profile = lore_service.merge_lore_profiles(individual_lores)
 
+    # Follow-structure mode: synthesize the shared skeleton across all references.
+    structure_profile = None
+    if follow_structure:
+        if all_ref_profiles:
+            structure_profile = structure_service.extract_structure_profile(
+                project, refresh=refresh_structure, on_log=log)
+        if not (structure_profile and not structure_profile.is_empty()):
+            log("Follow-structure requested but no usable reference skeleton — "
+                "falling back to max-originality mode.")
+            structure_profile = None
+
     direction = plan_creative_direction(
         project, genre,
         music_profile=reference_profile, lore_profile=lore_profile,
+        structure_profile=structure_profile,
         is_vs=is_vs, user_instruction=user_instruction, refresh=refresh,
     )
 
@@ -618,8 +741,13 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
 
     lines += ["", _format_direction_for_prompt(direction)]
 
+    use_structure = structure_profile is not None  # already validated non-empty above
+
     if reference_profile:
-        system_prompt = GENERATE_SYSTEM_PROMPT_WITH_REF
+        system_prompt = (
+            GENERATE_SYSTEM_PROMPT_STRUCTURE_WITH_REF if use_structure
+            else GENERATE_SYSTEM_PROMPT_WITH_REF
+        )
         flow = reference_profile.get("flow", {})
         lines += [
             "",
@@ -636,10 +764,20 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
         ]
         if lore_profile and not lore_profile.is_empty():
             lines += ["", _format_lore_for_prompt(lore_profile)]
+        if use_structure:
+            lines += ["", _format_structure_for_prompt(structure_profile)]
     else:
         system_prompt = GENERATE_SYSTEM_PROMPT_NO_REF
 
-    lines += ["", "Write the complete ORIGINAL Suno package. Return only valid JSON."]
+    if use_structure:
+        lines += [
+            "",
+            "Write the complete Suno package: FOLLOW the narrative structure above, but "
+            "write EVERY word, rhyme and hook yourself — 100% original expression. "
+            "Return only valid JSON.",
+        ]
+    else:
+        lines += ["", "Write the complete ORIGINAL Suno package. Return only valid JSON."]
     user_prompt = "\n".join(lines)
 
     data = anthropic_client.complete_json(system_prompt, user_prompt)

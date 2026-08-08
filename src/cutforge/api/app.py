@@ -127,9 +127,27 @@ def create_app() -> FastAPI:
             "urls": project.reference_urls,
             "profiles": [
                 {"index": i, "source_title": p.get("source_title", ""),
-                 "bpm": p.get("bpm"), "source_url": p.get("source_url", "")}
+                 "bpm": p.get("bpm"), "source_url": p.get("source_url", ""),
+                 "transcript": p.get("transcript", ""),
+                 "lyrics_source": p.get("lyrics_source", "whisper")}
                 for i, p in enumerate(profiles)
             ],
+        }
+
+    @app.post("/api/runs/{run_id}/references/{index}/lyrics")
+    def set_reference_lyrics(run_id: str, index: int, payload: dict | None = None):
+        data = payload or {}
+        lyrics = (data.get("lyrics") or "").strip()
+        project = VideoProject.load(run_id)
+        from cutforge.services import reference_service
+        profile = reference_service.set_reference_lyrics(project, index, lyrics)
+        if profile is None:
+            return JSONResponse({"error": "reference not analyzed yet"}, status_code=404)
+        return {
+            "index": index,
+            "source_title": profile.get("source_title", ""),
+            "transcript": profile.get("transcript", ""),
+            "lyrics_source": profile.get("lyrics_source", "manual"),
         }
 
     @app.delete("/api/runs/{run_id}/references/{index}")
@@ -165,6 +183,28 @@ def create_app() -> FastAPI:
         all_profiles = lore_service.load_all_lore_profiles(project)
         merged = lore_service.merge_lore_profiles(all_profiles)
         return merged.model_dump() if merged else profile.model_dump()
+
+    # ---- Narrative structure (proven skeleton synthesized from the reference[s]) ----
+    @app.get("/api/runs/{run_id}/structure-profile")
+    def get_structure_profile(run_id: str):
+        project = VideoProject.load(run_id)
+        from cutforge.services import structure_service
+        profile = structure_service.load_structure_profile(project)
+        if not profile:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return profile.model_dump()
+
+    @app.post("/api/runs/{run_id}/structure-profile/refresh")
+    def refresh_structure_profile(run_id: str, payload: dict | None = None):
+        data = payload or {}
+        instruction = (data.get("instruction") or "").strip()
+        project = VideoProject.load(run_id)
+        from cutforge.services import structure_service
+        profile = structure_service.extract_structure_profile(
+            project, refresh=True, user_instruction=instruction)
+        if not profile:
+            return JSONResponse({"error": "no reference to analyze"}, status_code=404)
+        return profile.model_dump()
 
     # ---- Creative direction (original-song brief) ----
     @app.get("/api/runs/{run_id}/creative-direction")
