@@ -27,7 +27,8 @@ def _reconstruct_lyrics(words: list[dict]) -> str:
 
 
 def analyze_reference(project: VideoProject, url: str, index: int = 0,
-                      *, refresh: bool = False, manual_lyrics: str = "", on_log=None) -> dict:
+                      *, refresh: bool = False, manual_lyrics: str = "",
+                      lyrics_source: str = "manual", on_log=None) -> dict:
     """Download, transcribe and rhythm-analyze one reference rap. Returns the profile.
 
     ``index`` selects the sub-folder (0 = primary, 1 = second reference, …).
@@ -39,6 +40,10 @@ def analyze_reference(project: VideoProject, url: str, index: int = 0,
     fallback when no manual lyrics are supplied (its rap transcription is unreliable).
     The audio is still downloaded and rhythm-analyzed either way — BPM/flow come from
     librosa, not Whisper.
+
+    ``lyrics_source``: how ``manual_lyrics`` was obtained — ``"manual"`` (pasted by hand)
+    or ``"subtitles"`` (fetched from the channel's manual YouTube subtitles). Recorded on
+    the profile for the UI badge. Ignored when Whisper runs (then it's ``"whisper"``).
     """
     log = on_log or (lambda _m: None)
 
@@ -99,7 +104,7 @@ def analyze_reference(project: VideoProject, url: str, index: int = 0,
             "syllables_per_beat": syllables_per_beat,
         },
         "transcript": transcript,
-        "lyrics_source": "manual" if manual_lyrics else "whisper",
+        "lyrics_source": lyrics_source if manual_lyrics else "whisper",
     }
 
     profile_path.write_text(json.dumps(profile, indent=2, ensure_ascii=False), encoding="utf-8")

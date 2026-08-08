@@ -150,6 +150,9 @@ def download_subtitles(url: str, out_dir: Path, *, lang: str = "en", on_log=None
     text = _vtt_to_text(vtt_files[0].read_text(encoding="utf-8", errors="replace"))
     log(f"Manual subtitles parsed: {len(text.splitlines())} lines.")
     return text
+
+
+def download_audio(url: str, dest: Path, *, audio_format: str = "mp3", on_log=None) -> dict:
     """Download audio-only from ``url``, transcode to ``audio_format``, save to ``dest``.
 
     Uses yt-dlp's extract-audio postprocessor (requires ffmpeg on PATH, same implicit

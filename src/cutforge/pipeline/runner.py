@@ -60,7 +60,8 @@ def _execute(step_id: str, project: VideoProject, params: dict, log: LogFn):
         index = int(params.get("index", 0))
         profile = reference_service.analyze_reference(
             project, url, index, refresh=params.get("refresh", False),
-            manual_lyrics=params.get("lyrics", ""), on_log=log)
+            manual_lyrics=params.get("lyrics", ""),
+            lyrics_source=params.get("lyrics_source", "manual"), on_log=log)
         return {"bpm": profile.get("bpm"), "title": profile.get("source_title"), "index": index}
 
     if step_id == "lyrics":

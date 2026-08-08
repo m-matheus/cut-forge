@@ -152,17 +152,22 @@ def create_app() -> FastAPI:
         }
 
     @app.get("/api/runs/{run_id}/references/{index}/subtitles")
-    def fetch_reference_subtitles(run_id: str, index: int, lang: str = "en"):
+    def fetch_reference_subtitles(run_id: str, index: int, lang: str = "en", url: str = ""):
         project = VideoProject.load(run_id)
-        urls = project.reference_urls
-        if index >= len(urls) or not urls[index]:
-            return JSONResponse({"error": "reference not found"}, status_code=404)
+        # ``url`` may be passed directly when fetching BEFORE the reference is analyzed
+        # (at add time). Otherwise fall back to the stored URL for that index.
+        target = (url or "").strip()
+        if not target:
+            urls = project.reference_urls
+            if index >= len(urls) or not urls[index]:
+                return JSONResponse({"error": "reference not found"}, status_code=404)
+            target = urls[index]
         import tempfile
         from cutforge.integrations import youtube_dl
         log = events.make_logger(run_id)
         with tempfile.TemporaryDirectory() as tmp:
             text = youtube_dl.download_subtitles(
-                urls[index], Path(tmp), lang=(lang or "en").strip(), on_log=log)
+                target, Path(tmp), lang=(lang or "en").strip(), on_log=log)
         return {"text": text, "available": bool(text.strip())}
 
     @app.delete("/api/runs/{run_id}/references/{index}")

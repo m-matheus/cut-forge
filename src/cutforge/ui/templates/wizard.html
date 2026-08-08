@@ -94,9 +94,20 @@
                   </button>
                 </div>
                 <details style="margin-top:.4rem">
-                  <summary style="font-size:.75rem;cursor:pointer;opacity:.75">Colar a letra manualmente (opcional)</summary>
-                  <p style="margin:.4rem 0 .3rem"><small class="muted">Se você já tem a letra (ex: da descrição do vídeo), cole aqui. O Whisper <strong>não</strong> roda quando há letra colada — só é usado como fallback.</small></p>
+                  <summary style="font-size:.75rem;cursor:pointer;opacity:.75">Letra da referência (opcional — evita o Whisper)</summary>
+                  <p style="margin:.4rem 0 .3rem"><small class="muted">O Whisper erra bastante em rap. Cole a letra (ex: da descrição), ou busque as legendas manuais do canal. Havendo letra aqui, o Whisper <strong>não</strong> roda ao analisar.</small></p>
+                  <div style="display:flex;gap:.4rem;align-items:center;margin-bottom:.35rem">
+                    <button class="secondary outline copy-btn" style="margin:0"
+                            @click="fetchSubtitlesForNew()"
+                            :disabled="!newReferenceUrl.trim() || busy.newSubs"
+                            :aria-busy="busy.newSubs">
+                      Buscar legendas do canal
+                    </button>
+                    <input style="width:5rem;font-size:.8rem;margin:0" x-model="newReferenceSubLang"
+                           placeholder="idioma" title="Código do idioma da legenda (ex: en, pt, es)">
+                  </div>
                   <textarea rows="6" style="width:100%;font-size:.8rem" x-model="newReferenceLyrics"
+                            @input="newReferenceSource='manual'"
                             placeholder="Cole a letra da música de referência…"></textarea>
                 </details>
               </div>
@@ -487,7 +498,7 @@ function wizard(runId, initialSteps, saved) {
     running: false,
     current: null,
     openStep: null,
-    busy: { suggest: false, lore: false, direction: false, structure: false, refLyrics: null, refSubs: null },
+    busy: { suggest: false, lore: false, direction: false, structure: false, refLyrics: null, refSubs: null, newSubs: false },
     genres: [],
     chosenGenre: '',
     chosenRefIndex: 0,
@@ -503,6 +514,8 @@ function wizard(runId, initialSteps, saved) {
     projectLanguage: saved.language || 'en',
     newReferenceUrl: '',
     newReferenceLyrics: '',
+    newReferenceSubLang: saved.language || 'en',
+    newReferenceSource: 'manual',
     referenceProfiles: [],
     genreBadge: '',
     trackUploaded: false,
@@ -659,9 +672,29 @@ function wizard(runId, initialSteps, saved) {
       if (!url) return;
       const index = this.referenceUrls.length;
       const lyrics = this.newReferenceLyrics.trim();
+      const lyrics_source = lyrics ? this.newReferenceSource : 'manual';
       this.newReferenceUrl = '';
       this.newReferenceLyrics = '';
-      await this.runStep('reference', { url, index, lyrics });
+      this.newReferenceSource = 'manual';
+      await this.runStep('reference', { url, index, lyrics, lyrics_source });
+    },
+
+    async fetchSubtitlesForNew() {
+      const url = this.newReferenceUrl.trim();
+      if (!url) return;
+      const lang = (this.newReferenceSubLang || this.projectLanguage || 'en').trim();
+      this.busy.newSubs = true;
+      try {
+        const r = await fetch(`/api/runs/${this.runId}/references/0/subtitles?lang=${encodeURIComponent(lang)}&url=${encodeURIComponent(url)}`);
+        if (!r.ok) { alert('Não foi possível buscar as legendas.'); return; }
+        const data = await r.json();
+        if (!data.available || !data.text.trim()) {
+          alert(`Nenhuma legenda manual encontrada no idioma "${lang}". Cole a letra manualmente ou use o Whisper.`);
+          return;
+        }
+        this.newReferenceLyrics = data.text;
+        this.newReferenceSource = 'subtitles';
+      } finally { this.busy.newSubs = false; }
     },
 
     async fetchSubtitles(ref) {
