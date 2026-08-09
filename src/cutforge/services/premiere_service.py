@@ -80,15 +80,19 @@ def build_project(project: VideoProject, *, on_log=None) -> Path:
 
     if not project.track_path.exists():
         raise FileNotFoundError(f"track.mp3 not found at {project.track_path}")
-    if not project.footage_path.exists():
-        raise FileNotFoundError(f"footage source.mp4 not found at {project.footage_path}")
+    footage_files = project.footage_paths()
+    if not footage_files:
+        raise FileNotFoundError(f"no footage found in {project.footage_dir}")
+    # The timeline lays the FIRST footage clip on V1; when a run has several clips the
+    # user stitches the rest in Premiere (that is the whole point of multi-footage).
+    footage_file = footage_files[0]
 
     fps = float(project.channel.video.fps)
     duration_s = _audio_duration_seconds(project.track_path)
     total_frames = max(1, round(duration_s * fps))
     song_range = TimeRange(RationalTime(0, fps), RationalTime(total_frames, fps))
 
-    footage_duration_s = _video_duration_seconds(project.footage_path)
+    footage_duration_s = _video_duration_seconds(footage_file)
     if footage_duration_s and footage_duration_s > 0:
         footage_frames = max(1, round(footage_duration_s * fps))
         footage_available_range = TimeRange(RationalTime(0, fps), RationalTime(footage_frames, fps))
@@ -117,7 +121,7 @@ def build_project(project: VideoProject, *, on_log=None) -> Path:
     footage_clip = otio.schema.Clip(
         name="footage",
         media_reference=otio.schema.ExternalReference(
-            target_url=_file_url(project.footage_path),
+            target_url=_file_url(footage_file),
             available_range=footage_available_range,
         ),
         source_range=footage_available_range,

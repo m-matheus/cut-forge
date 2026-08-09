@@ -107,12 +107,23 @@ class VideoProject(BaseModel):
         return self.footage_path_at(0)
 
     def footage_paths(self) -> list[Path]:
-        """All downloaded footage files, ordered by index."""
+        """All downloaded footage files, ordered by index.
+
+        Migrates the legacy single-file layout (``footage/source.mp4``, written before
+        multi-footage support) to ``source_01.mp4`` on first access, so old runs keep
+        working. Matches any ``source*.mp4`` so a not-yet-migrated legacy file still counts.
+        """
         if not self.footage_dir.exists():
             return []
+        legacy = self.footage_dir / "source.mp4"
+        if legacy.exists() and not self.footage_path_at(0).exists():
+            try:
+                legacy.rename(self.footage_path_at(0))
+            except OSError:
+                pass  # file locked/open — still counted by the glob below
         return sorted(
             p for p in self.footage_dir.iterdir()
-            if p.is_file() and p.suffix.lower() == ".mp4" and p.stem.startswith("source_")
+            if p.is_file() and p.suffix.lower() == ".mp4" and p.stem.startswith("source")
         )
 
     @property

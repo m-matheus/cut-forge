@@ -333,8 +333,12 @@ def create_app() -> FastAPI:
     async def upload_track(run_id: str, file: UploadFile):
         project = VideoProject.load(run_id)
         project.audio_dir.mkdir(parents=True, exist_ok=True)
+        log = events.make_logger(run_id)
+        log(f"Recebendo track.mp3 ({file.filename})…")
         data = await file.read()
         project.track_path.write_bytes(data)
+        mb = len(data) / 1_048_576
+        log(f"track.mp3 salvo: {mb:.1f} MB em {project.track_path.name}")
         return {"status": "ok", "size": len(data)}
 
     # ---- Thumbnail style-reference images (optional, per run) ----

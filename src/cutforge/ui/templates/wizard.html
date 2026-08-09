@@ -446,8 +446,14 @@
                 <!-- Upload tab -->
                 <div x-show="lyricsTab==='upload'">
                   <p><small>Depois de gerar no suno.ai, envie o <code>track.mp3</code>:</small></p>
-                  <input type="file" accept="audio/*" @change="uploadTrack($event)">
-                  <small x-show="trackUploaded" class="ok">track.mp3 enviado ✓</small>
+                  <input type="file" accept="audio/*" @change="uploadTrack($event)" :disabled="trackUploading">
+                  <template x-if="trackUploading">
+                    <div style="margin-top:.4rem">
+                      <progress :value="trackUploadPct" max="100" style="width:100%"></progress>
+                      <small class="muted">Enviando… <span x-text="trackUploadPct"></span>%</small>
+                    </div>
+                  </template>
+                  <small x-show="trackUploaded && !trackUploading" class="ok">track.mp3 enviado ✓</small>
                 </div>
 
                 <!-- Output preview -->
@@ -651,6 +657,8 @@ function wizard(runId, initialSteps, saved) {
     referenceProfiles: [],
     thumbnailRefsCount: 0,
     trackUploaded: false,
+    trackUploading: false,
+    trackUploadPct: 0,
     lyricsTab: 'generate',
     lyricsOutput: {},
     metadataOutput: {},
@@ -974,10 +982,44 @@ function wizard(runId, initialSteps, saved) {
     async uploadTrack(ev) {
       const file = ev.target.files[0];
       if (!file) return;
-      const fd = new FormData(); fd.append('file', file);
-      await fetch(`/api/runs/${this.runId}/track`, { method: 'POST', body: fd });
-      this.trackUploaded = true;
-      this.refreshState();
+      const mb = (file.size / 1048576).toFixed(1);
+      this.trackUploaded = false;
+      this.trackUploading = true;
+      this.trackUploadPct = 0;
+      this.logLines.push(`▶ Enviando track.mp3 (${file.name}, ${mb} MB)…`);
+      try {
+        await new Promise((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.open('POST', `/api/runs/${this.runId}/track`);
+          xhr.upload.onprogress = (e) => {
+            if (!e.lengthComputable) return;
+            const pct = Math.round((e.loaded / e.total) * 100);
+            // Only log at 10% steps so the log doesn't flood.
+            if (pct !== this.trackUploadPct && pct % 10 === 0) {
+              this.logLines.push(`  track.mp3: ${pct}% (${(e.loaded / 1048576).toFixed(1)}/${mb} MB)`);
+            }
+            this.trackUploadPct = pct;
+          };
+          xhr.onload = () => {
+            if (xhr.status >= 200 && xhr.status < 300) resolve();
+            else reject(new Error(`HTTP ${xhr.status}`));
+          };
+          xhr.onerror = () => reject(new Error('falha de rede'));
+          const fd = new FormData(); fd.append('file', file);
+          xhr.send(fd);
+        });
+        this.trackUploaded = true;
+        this.logLines.push(`✓ track.mp3 enviado (${mb} MB).`);
+        this.toast('track.mp3 enviado ✓');
+        await this.refreshState();
+      } catch (err) {
+        this.logLines.push(`✗ ERRO ao enviar track.mp3: ${err.message}`);
+        this.toast('Erro ao enviar track.mp3');
+      } finally {
+        this.trackUploading = false;
+        // Reset the input so re-selecting the same file fires @change again.
+        ev.target.value = '';
+      }
     },
 
     async uploadThumbnailRefs(ev) {
