@@ -82,8 +82,9 @@ def _execute(step_id: str, project: VideoProject, params: dict, log: LogFn):
         url = params.get("url")
         if not url:
             raise ValueError("Missing 'url' for footage download.")
-        meta = footage_service.download_footage(project, url, on_log=log)
-        return {"title": meta.get("title"), "duration": meta.get("duration")}
+        index = int(params.get("index", len(project.footage_urls)))
+        meta = footage_service.download_footage(project, url, index, on_log=log)
+        return {"title": meta.get("title"), "duration": meta.get("duration"), "index": index}
 
     if step_id == "align":
         alignment = alignment_service.align_project(
@@ -135,6 +136,12 @@ def run_step(run_id: str, step_id: str, params: dict | None = None, *,
     if step_id == "reference" and not force:
         idx = int(params.get("index", 0))
         if not project.ref_profile_path(idx).exists():
+            force = True
+
+    # Same logic for footage: adding a new clip (index 1, 2, …) should always run.
+    if step_id == "footage" and not force:
+        idx = int(params.get("index", len(project.footage_urls)))
+        if not project.footage_path_at(idx).exists():
             force = True
 
     if step.is_done(project) and not force:

@@ -17,7 +17,7 @@ def align_words(
     cache_path: Path | None = None,
     refresh: bool = False,
     language: str = "en",
-    model_name: str = "small",
+    model_name: str = "medium",
     on_log=None,
 ) -> list[dict]:
     """Force-align ``text`` to ``audio_path``. Returns ``[{word, start, end}]``.
@@ -45,7 +45,7 @@ def align_words(
         on_log(f"Force-aligning {audio_path.name} with stable-ts ({model_name})...")
 
     model = stable_whisper.load_model(model_name)
-    result = model.align(str(audio_path), text, language=language)
+    result = model.align(str(audio_path), text, language=language, suppress_silence=True)
 
     out: list[dict] = []
     for seg in result.segments:
@@ -77,7 +77,7 @@ def transcribe_words(
     cache_path: Path | None = None,
     refresh: bool = False,
     language: str | None = None,
-    model_name: str = "small",
+    model_name: str = "medium",
     on_log=None,
 ) -> list[dict]:
     """Transcribe ``audio_path`` from scratch (unknown lyrics). Returns ``[{word, start, end}]``.
@@ -120,6 +120,7 @@ def transcribe_words(
         # Mask non-speech spans (Silero VAD) instead of transcribing over them.
         vad=True,
         suppress_silence=True,
+        only_voice_freq=True,
     )
 
     out: list[dict] = []

@@ -10,7 +10,7 @@
 </nav>
 
 <article
-  x-data='wizard("{{ project.run_id }}", {{ steps | tojson }}, {{ {"footageUrl": project.footage_url, "referenceUrls": project.reference_urls, "language": project.language} | tojson }})'
+  x-data='wizard("{{ project.run_id }}", {{ steps | tojson }}, {{ {"footageUrls": project.footage_urls, "referenceUrls": project.reference_urls, "language": project.language} | tojson }})'
   x-init="init()">
 
   <hgroup>
@@ -479,10 +479,31 @@
             <!-- FOOTAGE -->
             <template x-if="step.id === 'footage'">
               <div>
-                <input placeholder="URL do YouTube (AMV / edit)" x-model="footageUrl">
-                <button @click="runStep('footage', { url: footageUrl })"
-                        :disabled="!footageUrl || running"
-                        :aria-busy="running && current==='footage'">Baixar</button>
+                <p><small>Adicione um ou mais clipes de fundo (AMV / edits). Você pode juntar vários no Premiere.</small></p>
+
+                <!-- List of already-downloaded footages -->
+                <template x-if="footageItems.length > 0">
+                  <div style="margin-bottom:.75rem">
+                    <template x-for="ft in footageItems" :key="ft.index">
+                      <div class="output-block" style="margin-bottom:.4rem;padding:.5rem .75rem">
+                        <div style="display:flex;align-items:center;gap:.5rem">
+                          <span style="font-size:.7rem;opacity:.5" x-text="`#${ft.index + 1}`"></span>
+                          <div style="flex:1;min-width:0;font-size:.85rem;word-break:break-all" x-text="ft.url"></div>
+                          <span x-show="ft.exists" style="font-size:.7rem;opacity:.6">✓</span>
+                          <button class="secondary outline" style="padding:.2rem .5rem;font-size:.75rem"
+                                  @click="removeFootage(ft.index)" :disabled="running">✕</button>
+                        </div>
+                      </div>
+                    </template>
+                  </div>
+                </template>
+
+                <div style="display:flex;gap:.5rem;align-items:center">
+                  <input placeholder="URL do YouTube (AMV / edit)" x-model="newFootageUrl" style="flex:1;margin:0">
+                  <button @click="addFootage()"
+                          :disabled="!newFootageUrl || running"
+                          :aria-busy="running && current==='footage'">Baixar</button>
+                </div>
               </div>
             </template>
 
@@ -617,7 +638,9 @@ function wizard(runId, initialSteps, saved) {
     storyInstruction: '',
     lyricsMode: 'original',
     newHook: true,
-    footageUrl: saved.footageUrl || '',
+    footageUrls: saved.footageUrls || [],
+    newFootageUrl: '',
+    footageItems: [],
     referenceUrls: saved.referenceUrls || [],
     projectLanguage: saved.language || 'en',
     newReferenceUrl: '',
@@ -701,6 +724,8 @@ function wizard(runId, initialSteps, saved) {
         this.referenceUrls = rd.urls || [];
         this.hasReference = this.referenceProfiles.length > 0;
       }
+      // Always load footage list.
+      await this.loadFootages();
       // Thumbnail style-reference images (persist per run).
       const trefs = await fetch(`/api/runs/${this.runId}/thumbnail-refs`);
       if (trefs.ok) this.thumbnailRefsCount = (await trefs.json()).count || 0;
@@ -891,6 +916,28 @@ function wizard(runId, initialSteps, saved) {
       await this.refreshState();
     },
 
+    async loadFootages() {
+      const res = await fetch(`/api/runs/${this.runId}/footages`);
+      if (res.ok) {
+        const data = await res.json();
+        this.footageItems = data.footages || [];
+      }
+    },
+
+    async addFootage() {
+      const url = this.newFootageUrl.trim();
+      if (!url) return;
+      this.newFootageUrl = '';
+      await this.runStep('footage', { url });
+    },
+
+    async removeFootage(index) {
+      if (!confirm(`Remover footage ${index + 1}?\n\nContinuar?`)) return;
+      await fetch(`/api/runs/${this.runId}/footages/${index}`, { method: 'DELETE' });
+      await this.loadFootages();
+      await this.refreshState();
+    },
+
     confirmRun(stepId, params, warning) {
       if (!confirm(warning + '\n\nContinuar?')) return;
       this.runStep(stepId, params);
@@ -898,7 +945,6 @@ function wizard(runId, initialSteps, saved) {
 
     redoStep(step) {
       let params = {};
-      if (step.id === 'footage') params = { url: this.footageUrl };
       if (!confirm('Isso vai refazer o passo e substituir a saída atual.\n\nContinuar?')) return;
       this.runStep(step.id, params, true);
     },

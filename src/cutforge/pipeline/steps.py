@@ -56,7 +56,7 @@ STEPS: list[Step] = [
     Step(
         id="footage",
         label="Footage",
-        is_done=lambda p: p.footage_path.exists(),
+        is_done=lambda p: bool(p.footage_paths()),
         can_run=_always,
         requires_hint="Informe a URL do YouTube.",
     ),
@@ -91,7 +91,7 @@ STEPS: list[Step] = [
         id="premiere",
         label="Exportar Premiere",
         is_done=lambda p: p.premiere_project_path.exists(),
-        can_run=lambda p: p.footage_path.exists() and p.track_path.exists(),
+        can_run=lambda p: bool(p.footage_paths()) and p.track_path.exists(),
         requires_hint="Precisa do footage e do track.mp3.",
     ),
 ]

@@ -100,9 +100,26 @@ def create_app() -> FastAPI:
         shutil.rmtree(run_dir, ignore_errors=True)
         return {"status": "deleted", "run_id": run_id}
 
+    # ---- Footage list ----
+    @app.get("/api/runs/{run_id}/footages")
+    def list_footages(run_id: str):
+        project = VideoProject.load(run_id)
+        items = []
+        for i, url in enumerate(project.footage_urls):
+            path = project.footage_path_at(i)
+            items.append({"index": i, "url": url, "exists": path.exists(),
+                          "filename": path.name})
+        return {"footages": items}
+
+    @app.delete("/api/runs/{run_id}/footages/{index}")
+    def delete_footage(run_id: str, index: int):
+        project = VideoProject.load(run_id)
+        from cutforge.services import footage_service
+        footage_service.remove_footage(project, index)
+        return {"status": "deleted", "index": index}
+
     # ---- Lyrics: genre suggestions (synchronous — quick) ----
-    @app.post("/api/runs/{run_id}/suggest-genres")
-    def suggest_genres(run_id: str, payload: dict | None = None):
+    @app.post("/api/runs/{run_id}/suggest-genres")    def suggest_genres(run_id: str, payload: dict | None = None):
         project = VideoProject.load(run_id)
         suggestions = song_service.suggest_genres(project)
         return suggestions.model_dump()

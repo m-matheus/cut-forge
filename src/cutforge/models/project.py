@@ -35,15 +35,19 @@ class VideoProject(BaseModel):
 
     # Filled by later steps
     title: str = ""
-    footage_url: str = ""
+    footage_urls: list[str] = Field(default_factory=list)
     reference_urls: list[str] = Field(default_factory=list)
     # DEPRECATED — kept so old project.json files still load. Migrated to
-    # reference_urls on first load via model_post_init.
+    # footage_urls / reference_urls on first load via model_post_init.
+    footage_url: str = ""
     reference_url: str = ""
     # DEPRECATED — kept only so old project.json files still load.
     content_blend: str = "rhythm"
 
     def model_post_init(self, __context) -> None:
+        # Migrate legacy single footage_url → footage_urls list.
+        if self.footage_url and not self.footage_urls:
+            self.footage_urls = [self.footage_url]
         # Migrate legacy single reference_url → reference_urls list.
         if self.reference_url and not self.reference_urls:
             self.reference_urls = [self.reference_url]
@@ -95,9 +99,21 @@ class VideoProject(BaseModel):
     def footage_dir(self) -> Path:
         return self.run_dir / "footage"
 
+    def footage_path_at(self, index: int) -> Path:
+        return self.footage_dir / f"source_{index + 1:02d}.mp4"
+
     @property
     def footage_path(self) -> Path:
-        return self.footage_dir / "source.mp4"
+        return self.footage_path_at(0)
+
+    def footage_paths(self) -> list[Path]:
+        """All downloaded footage files, ordered by index."""
+        if not self.footage_dir.exists():
+            return []
+        return sorted(
+            p for p in self.footage_dir.iterdir()
+            if p.is_file() and p.suffix.lower() == ".mp4" and p.stem.startswith("source_")
+        )
 
     @property
     def thumbnail_dir(self) -> Path:
