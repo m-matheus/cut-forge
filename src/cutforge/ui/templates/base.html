@@ -10,8 +10,9 @@
   <script src="/static/htmx-sse.js" defer></script>
   <script src="/static/alpine.min.js" defer></script>
 </head>
-<body>
-  <header class="container">
+<body class="{% block body_class %}{% endblock %}">
+  {% block shell %}
+  <header class="container topbar">
     <nav>
       <ul>
         <li><a href="/" class="brand"><strong>CUT<span>FORGE</span></strong></a></li>
@@ -21,5 +22,6 @@
   <main class="container">
     {% block content %}{% endblock %}
   </main>
+  {% endblock %}
 </body>
 </html>

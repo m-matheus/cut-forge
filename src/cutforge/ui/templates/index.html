@@ -69,6 +69,11 @@
       <template x-for="run in runs" :key="run.run_id">
         <div class="run-card">
           <a :href="'/runs/' + run.run_id" class="run-card-link">
+            <div class="run-ring"
+                 :class="run.total_steps && run.done_count >= run.total_steps ? 'is-complete' : ''"
+                 :style="`--pct: ${run.total_steps ? Math.round(run.done_count / run.total_steps * 100) : 0}`">
+              <span x-text="(run.total_steps && run.done_count >= run.total_steps) ? '✓' : (run.done_count || 0) + '/' + (run.total_steps || 8)"></span>
+            </div>
             <div class="run-card-main">
               <strong x-text="(run.character || run.run_id) + (run.anime ? ' · ' + run.anime : '')"></strong>
               <template x-if="run.title">
@@ -77,10 +82,12 @@
             </div>
           </a>
           <div class="run-card-meta">
-            <code class="run-id" x-text="run.run_id"></code>
+            <template x-if="run.created_at">
+              <span class="run-date" x-text="run.created_at"></span>
+            </template>
             <span class="run-lang" x-text="run.language"></span>
           </div>
-          <button class="run-delete secondary outline" title="Deletar run"
+          <button class="run-delete" title="Deletar run"
                   @click="
                     if (!confirm('Deletar este run e todos os seus arquivos? Isso não pode ser desfeito.')) return;
                     await fetch('/api/runs/' + run.run_id, { method: 'DELETE' });
@@ -91,7 +98,10 @@
     </div>
   </template>
   <template x-if="!runs.length">
-    <p class="muted empty-state">Nenhum vídeo criado ainda. Comece pelo formulário acima.</p>
+    <div class="empty-state">
+      <span class="empty-icon">🎬</span>
+      <p>Nenhum vídeo criado ainda. Comece pelo formulário acima ↑</p>
+    </div>
   </template>
 </section>
 {% endblock %}

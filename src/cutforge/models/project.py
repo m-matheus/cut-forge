@@ -263,18 +263,49 @@ def list_runs() -> list[str]:
 
 
 def list_runs_summary() -> list[dict]:
-    """Return lightweight dicts with display info for each run, newest first."""
+    """Return lightweight dicts with display info for each run, newest first.
+
+    Includes step progress (done/total) and a created date so the home cards can
+    show how far along each run is without a per-card round trip. Progress is
+    derived from files on disk (idempotent step outputs), never from running state.
+    """
+    from cutforge.pipeline.steps import wizard_state
+
     result = []
     for run_id in list_runs():
         try:
             p = VideoProject.load(run_id)
+            steps = wizard_state(p)
+            done = sum(1 for s in steps if s["status"] == "done")
             result.append({
                 "run_id": run_id,
                 "character": p.character,
                 "anime": p.anime,
                 "language": p.language,
                 "title": p.title,
+                "done_count": done,
+                "total_steps": len(steps),
+                "created_at": _run_created_date(run_id, p.run_dir),
             })
         except Exception:
-            result.append({"run_id": run_id, "character": "", "anime": "", "language": "", "title": ""})
+            result.append({
+                "run_id": run_id, "character": "", "anime": "", "language": "",
+                "title": "", "done_count": 0, "total_steps": 0, "created_at": "",
+            })
     return result
+
+
+def _run_created_date(run_id: str, run_dir: Path) -> str:
+    """Best-effort ISO date (YYYY-MM-DD) for a run.
+
+    Prefers the ``YYYYMMDD`` prefix baked into the run_id at creation; falls back to
+    the run folder's modification time when the id isn't date-prefixed.
+    """
+    prefix = run_id.split("-", 1)[0]
+    if len(prefix) == 8 and prefix.isdigit():
+        return f"{prefix[:4]}-{prefix[4:6]}-{prefix[6:8]}"
+    try:
+        from datetime import datetime
+        return datetime.fromtimestamp(run_dir.stat().st_mtime).strftime("%Y-%m-%d")
+    except OSError:
+        return ""

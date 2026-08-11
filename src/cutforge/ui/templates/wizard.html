@@ -1,37 +1,68 @@
 {% extends "base.html" %}
 {% block title %}{{ project.run_id }} — CutForge{% endblock %}
-{% block content %}
+{% block body_class %}cockpit-body{% endblock %}
+{% block shell %}
 
 <!-- Toast container -->
 <div id="toast-container" aria-live="polite"></div>
 
-<nav class="breadcrumb">
-  <a href="/">← Todos os runs</a>
-</nav>
-
-<article
+<article class="cockpit"
   x-data='wizard("{{ project.run_id }}", {{ steps | tojson }}, {{ {"footageUrls": project.footage_urls, "referenceUrls": project.reference_urls, "language": project.language} | tojson }})'
   x-init="init()">
 
-  <hgroup>
-    <h1>{{ project.character }}{% if project.anime %} · {{ project.anime }}{% endif %}</h1>
-    <p><code>{{ project.run_id }}</code> · idioma <strong>{{ project.language }}</strong>
-       {% if project.mood %}· <em>{{ project.mood }}</em>{% endif %}</p>
-  </hgroup>
+  <!-- Sidebar: run identity + step navigation -->
+  <aside class="cockpit-nav">
+    <div class="cockpit-nav-top">
+      <a href="/" class="brand"><strong>CUT<span>FORGE</span></strong></a>
+      <a href="/" class="cockpit-back">← Runs</a>
+    </div>
 
-  <div class="grid wizard-layout">
-    <!-- Steps column (accordion) -->
-    <div>
-      <template x-for="step in steps" :key="step.id">
-        <article class="step-card" :class="stepClass(step)" :id="'step-' + step.id">
-          <header class="step-head" @click="toggleStep(step.id)">
-            <span class="step-badge" x-text="badge(step.status)"></span>
-            <strong x-text="step.label"></strong>
-            <span class="step-status" x-text="statusLabel(step.status)"></span>
-            <span class="step-chevron" x-text="openStep===step.id ? '▾' : '▸'"></span>
-          </header>
+    <div class="cockpit-run">
+      <h1 class="cockpit-run-title">{{ project.character }}</h1>
+      {% if project.anime %}<p class="cockpit-run-anime">{{ project.anime }}</p>{% endif %}
+      <p class="cockpit-run-meta">
+        <code>{{ project.run_id }}</code>
+        <span class="run-lang">{{ project.language }}</span>
+      </p>
+      {% if project.mood %}<p class="cockpit-run-mood"><em>{{ project.mood }}</em></p>{% endif %}
+    </div>
 
-          <div class="step-body" x-show="openStep===step.id">
+    <div class="cockpit-progress">
+      <div class="cockpit-progress-track">
+        <div class="cockpit-progress-fill"
+             :style="`width: ${steps.length ? (doneCount / steps.length * 100) : 0}%`"></div>
+      </div>
+      <span class="cockpit-progress-label"><strong x-text="doneCount"></strong> / <span x-text="steps.length"></span></span>
+    </div>
+
+    <nav class="nav-steps">
+      <template x-for="(step, stepIndex) in steps" :key="step.id">
+        <button type="button" class="nav-step" :class="stepClass(step) + (openStep===step.id ? ' is-active' : '')"
+                @click="selectStep(step.id)">
+          <span class="nav-step-num" x-text="String(stepIndex + 1).padStart(2, '0')"></span>
+          <span class="step-badge nav-step-badge" x-text="badge(step.status)"></span>
+          <span class="nav-step-label">
+            <span class="nav-step-name" x-text="step.label"></span>
+            <template x-if="step.status==='locked' && step.requires_hint">
+              <small class="nav-step-hint" x-text="step.requires_hint"></small>
+            </template>
+          </span>
+        </button>
+      </template>
+    </nav>
+  </aside>
+
+  <!-- Main working pane: only the active step body -->
+  <section class="cockpit-main">
+    <template x-for="(step, stepIndex) in steps" :key="step.id">
+      <div class="pane" x-show="openStep===step.id" :class="stepClass(step)">
+        <header class="pane-head">
+          <span class="pane-num" x-text="String(stepIndex + 1).padStart(2, '0')"></span>
+          <h2 x-text="step.label"></h2>
+          <span class="step-status" x-text="statusLabel(step.status)"></span>
+        </header>
+
+        <div class="step-body">
 
             <!-- REFERENCE (optional, multiple) -->
             <template x-if="step.id === 'reference'">
@@ -539,8 +570,10 @@
                         :disabled="running"
                         :aria-busy="running && current==='thumbnail'">Gerar thumbnail</button>
                 <template x-if="step.status==='done'">
-                  <img class="thumb" :src="`/api/runs/${runId}/output/thumbnail?t=${Date.now()}`"
-                       alt="Thumbnail gerada">
+                  <a class="thumb-link" :href="`/api/runs/${runId}/output/thumbnail?t=${Date.now()}`" target="_blank" title="Abrir em tamanho real">
+                    <img class="thumb" :src="`/api/runs/${runId}/output/thumbnail?t=${Date.now()}`"
+                         alt="Thumbnail gerada">
+                  </a>
                 </template>
               </div>
             </template>
@@ -601,23 +634,22 @@
               <small class="muted locked-hint" x-text="step.requires_hint"></small>
             </template>
           </div>
-        </article>
+        </div>
       </template>
-    </div>
+    </section>
 
-    <!-- Log column (sticky, always visible) -->
-    <div>
-      <article class="log-panel">
-        <header class="log-head">
-          <strong>Log</strong>
-          <span x-show="running" aria-busy="true"></span>
-          <button class="secondary outline log-copy" @click="copyLog()"
-                  :disabled="!logLines.length" title="Copiar todo o log">Copiar log</button>
-        </header>
-        <pre class="log" x-ref="log"><template x-for="(l,i) in logLines" :key="i"><span :class="logClass(l)" x-text="l + '\n'"></span></template></pre>
-      </article>
-    </div>
-  </div>
+    <!-- Docked console (Vercel-style) -->
+    <footer class="cockpit-console" :class="consoleOpen ? 'is-open' : 'is-collapsed'">
+      <header class="log-head" @click="consoleOpen = !consoleOpen">
+        <span class="log-dot" :class="running ? 'is-live' : ''"></span>
+        <strong>Console</strong>
+        <span class="log-count" x-show="logLines.length" x-text="logLines.length + ' linhas'"></span>
+        <button class="secondary outline log-copy" @click.stop="copyLog()"
+                :disabled="!logLines.length" title="Copiar todo o log">Copiar</button>
+        <span class="console-toggle" x-text="consoleOpen ? '▾' : '▴'"></span>
+      </header>
+      <pre class="log" x-ref="log" x-show="consoleOpen"><template x-for="(l,i) in logLines" :key="i"><span class="log-line" :class="logClass(l.text)"><span class="log-ts" x-text="l.ts"></span><span x-text="l.text + '\n'"></span></span></template></pre>
+    </footer>
 </article>
 
 <script>
@@ -630,6 +662,7 @@ function wizard(runId, initialSteps, saved) {
     running: false,
     current: null,
     openStep: null,
+    consoleOpen: true,
     busy: { suggest: false, lore: false, direction: false, structure: false, story: false, refLyrics: null, refSubs: null, newSubs: false },
     genres: [],
     chosenGenre: '',
@@ -672,7 +705,7 @@ function wizard(runId, initialSteps, saved) {
 
       this._es = new EventSource(`/api/runs/${this.runId}/events`);
       this._es.addEventListener('log', (e) => {
-        this.logLines.push(e.data);
+        this.pushLog(e.data);
         this.$nextTick(() => { const el = this.$refs.log; if (el) el.scrollTop = el.scrollHeight; });
       });
       this._es.addEventListener('done', () => {
@@ -692,7 +725,20 @@ function wizard(runId, initialSteps, saved) {
       this.loadOutputs();
     },
 
+    get doneCount() { return this.steps.filter(s => s.status === 'done').length; },
+
+    // Append a log line stamped with the current HH:MM:SS (Vercel-style prefix).
+    pushLog(text) {
+      const d = new Date();
+      const ts = [d.getHours(), d.getMinutes(), d.getSeconds()]
+        .map(n => String(n).padStart(2, '0')).join(':');
+      this.logLines.push({ ts, text });
+    },
+
     toggleStep(id) { this.openStep = this.openStep === id ? null : id; },
+
+    // Cockpit nav: select a step (always shows it in the main pane, never collapses).
+    selectStep(id) { this.openStep = id; },
 
     stepClass(step) {
       const classes = ['status-' + step.status];
@@ -969,7 +1015,7 @@ function wizard(runId, initialSteps, saved) {
 
     async runStep(stepId, params, force) {
       this.running = true; this.current = stepId;
-      this.logLines.push(`▶ ${stepId}`);
+      this.pushLog(`▶ ${stepId}`);
       const body = { ...(params || {}) };
       if (force) body.force = true;
       await fetch(`/api/runs/${this.runId}/steps/${stepId}`, {
@@ -986,7 +1032,7 @@ function wizard(runId, initialSteps, saved) {
       this.trackUploaded = false;
       this.trackUploading = true;
       this.trackUploadPct = 0;
-      this.logLines.push(`▶ Enviando track.mp3 (${file.name}, ${mb} MB)…`);
+      this.pushLog(`▶ Enviando track.mp3 (${file.name}, ${mb} MB)…`);
       try {
         await new Promise((resolve, reject) => {
           const xhr = new XMLHttpRequest();
@@ -996,7 +1042,7 @@ function wizard(runId, initialSteps, saved) {
             const pct = Math.round((e.loaded / e.total) * 100);
             // Only log at 10% steps so the log doesn't flood.
             if (pct !== this.trackUploadPct && pct % 10 === 0) {
-              this.logLines.push(`  track.mp3: ${pct}% (${(e.loaded / 1048576).toFixed(1)}/${mb} MB)`);
+              this.pushLog(`  track.mp3: ${pct}% (${(e.loaded / 1048576).toFixed(1)}/${mb} MB)`);
             }
             this.trackUploadPct = pct;
           };
@@ -1009,11 +1055,11 @@ function wizard(runId, initialSteps, saved) {
           xhr.send(fd);
         });
         this.trackUploaded = true;
-        this.logLines.push(`✓ track.mp3 enviado (${mb} MB).`);
+        this.pushLog(`✓ track.mp3 enviado (${mb} MB).`);
         this.toast('track.mp3 enviado ✓');
         await this.refreshState();
       } catch (err) {
-        this.logLines.push(`✗ ERRO ao enviar track.mp3: ${err.message}`);
+        this.pushLog(`✗ ERRO ao enviar track.mp3: ${err.message}`);
         this.toast('Erro ao enviar track.mp3');
       } finally {
         this.trackUploading = false;
@@ -1043,7 +1089,8 @@ function wizard(runId, initialSteps, saved) {
 
     copyLog() {
       if (!this.logLines.length) return;
-      navigator.clipboard.writeText(this.logLines.join('\n')).then(() => this.toast('Log copiado!'));
+      const text = this.logLines.map(l => `[${l.ts}] ${l.text}`).join('\n');
+      navigator.clipboard.writeText(text).then(() => this.toast('Log copiado!'));
     },
 
     toast(msg) {

@@ -4,7 +4,7 @@
   "content_type": "music",
   "languages": ["en", "es", "pt"],
   "brand": {
-    "primary_color": "#00E5FF",
+    "primary_color": "#FF6B00",
     "accent_color": "#FF1744",
     "background_color": "#050505",
     "text_color": "#FFFFFF"
