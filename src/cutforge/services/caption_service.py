@@ -24,6 +24,11 @@ def _is_glue(word: str) -> bool:
     return re.sub(r"[^\w]", "", word).lower() in _GLUE_WORDS
 
 
+def _strip_trailing_comma(text: str) -> str:
+    """A caption block should never end on a comma — drop trailing comma(s)/space."""
+    return text.rstrip(", ")
+
+
 def seconds_to_srt_time(seconds: float) -> str:
     """SRT timestamp: HH:MM:SS,mmm (comma decimal, milliseconds)."""
     if seconds < 0:
@@ -45,13 +50,14 @@ def build_srt(lines: list[LyricLine], *, max_chunk_duration: float = 1.5,
     a new line. Within a line, words accumulate until the chunk spans
     max_chunk_duration seconds OR reaches max_words words (whichever comes first).
 
-    Two post-processing passes improve quality:
+    Post-processing passes improve quality:
     - Glue-word repair: if the last word of a chunk is a short function word
       (I, a, the, to, and, …) it is moved to the start of the next chunk within
       the same line, so phrase openings stay with their phrase.
-    - Section-break hold: when the gap to the next caption is large (>2s the
-      caption holds for only 0.5s after the last word, giving a clean blank
-      screen during instrumental breaks instead of a lingering subtitle.
+    - Trailing-comma strip: a block never ends on a comma (it is dropped).
+    - Tight end times: each caption clears shortly after its last sung word
+      (TAIL_HOLD) instead of lingering, but consecutive lines chain seamlessly
+      when the next one starts almost immediately (CHAIN_GAP).
     """
     # --- Phase 1: build per-line word-level chunks ---
     line_chunk_lists: list[list[list]] = []
@@ -84,6 +90,7 @@ def build_srt(lines: list[LyricLine], *, max_chunk_duration: float = 1.5,
     for chunks in line_chunk_lists:
         for chunk in chunks:
             text = " ".join(w.word for w in chunk).upper().strip()
+            text = _strip_trailing_comma(text)
             if text:
                 groups.append({
                     "start": chunk[0].start,
@@ -92,26 +99,32 @@ def build_srt(lines: list[LyricLine], *, max_chunk_duration: float = 1.5,
                 })
 
     # --- Phase 4: compute SRT end times ---
-    # During flowing lyrics (gap to next < 2s) hold up to 1.5s so captions
-    # scroll smoothly. At section breaks (instrumental, gap ≥ 2s) hold only
-    # 0.5s so the screen clears quickly before the silence.
-    MAX_HOLD = 1.5
-    SECTION_BREAK_HOLD = 0.5
-    SECTION_BREAK_GAP = 2.0
+    # End each caption tightly after its last sung word (like Premiere's own
+    # transcript) instead of letting it linger. Knobs:
+    #   TAIL_HOLD — how long a caption stays after the last word before a pause,
+    #               so it clears quickly instead of dragging into the silence.
+    #   CHAIN_GAP — if the next caption starts within this, hold until it so
+    #               back-to-back lines chain seamlessly (no blank flicker).
+    #   MIN_DUR   — floor so very short chunks stay readable (never overlapping next).
+    TAIL_HOLD = 0.4
+    CHAIN_GAP = 0.7
+    MIN_DUR = 0.8
 
     out = []
     for i, grp in enumerate(groups):
         start = grp["start"]
         word_end = grp["word_end"]
         if i + 1 < len(groups):
-            gap_to_next = groups[i + 1]["start"] - word_end
-            raw_end = max(groups[i + 1]["start"], start + 0.3)
-            hold = SECTION_BREAK_HOLD if gap_to_next > SECTION_BREAK_GAP else MAX_HOLD
+            next_start = groups[i + 1]["start"]
+            if next_start - word_end <= CHAIN_GAP:
+                end = next_start                              # chain into the next line
+            else:
+                end = word_end + TAIL_HOLD                    # clear quickly before the pause
+                end = max(end, min(start + MIN_DUR, next_start))
+            end = min(end, next_start)                        # never overlap the next caption
         else:
-            raw_end = max(word_end, start + 0.8)
-            hold = MAX_HOLD
-        end = min(raw_end, word_end + hold)
-        end = max(end, start + 0.3)
+            end = max(word_end + TAIL_HOLD, start + MIN_DUR)
+        end = max(end, start + 0.3)                           # absolute floor
         out.append(
             f"{i + 1}\n"
             f"{seconds_to_srt_time(start)} --> {seconds_to_srt_time(end)}\n"
