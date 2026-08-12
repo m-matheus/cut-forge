@@ -546,9 +546,9 @@
 
             <!-- ALIGN -->
             <template x-if="step.id === 'align'">
-              <button @click="confirmRun('align', {}, 'Alinhar chama a API Whisper (OpenAI).')"
+              <button @click="runStep('align', {})"
                       :disabled="step.status==='locked' || running"
-                      :aria-busy="running && current==='align'">Alinhar letra (Whisper)</button>
+                      :aria-busy="running && current==='align'">Alinhar letra</button>
             </template>
 
             <!-- CAPTIONS -->

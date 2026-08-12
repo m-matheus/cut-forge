@@ -511,6 +511,10 @@ body.cockpit-body {
   grid-template-rows: 1fr auto;
   height: 100vh;
   gap: 0;
+  padding: 0;
+  margin: 0;
+  border-radius: 0;
+  box-shadow: none;
 }
 
 /* ---- Sidebar ---- */
@@ -606,6 +610,8 @@ body.cockpit-body {
   border-top: 1px solid var(--cf-border);
   background: var(--cf-surface-1);
   display: flex; flex-direction: column;
+  margin: 0;
+  padding: 0;
 }
 .cockpit-console .log-head { cursor: pointer; }
 .cockpit-console .log { height: 30vh; border-radius: 0; }
