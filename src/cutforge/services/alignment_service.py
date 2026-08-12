@@ -35,8 +35,21 @@ def parse_lyrics(lyrics_text: str) -> list[list[str]]:
     return lines
 
 
-def align(clean_words: list[str], timed_words: list[dict]) -> list[dict]:
-    """Map clean lyric words onto Whisper's timed words via sequence matching."""
+def align(clean_words: list[str], timed_words: list[dict], *,
+          reject_jumps: bool = True) -> list[dict]:
+    """Map clean lyric words onto Whisper's timed words via sequence matching.
+
+    ``reject_jumps`` controls the chorus-misbinding guard (``_reject_jump_anchors``).
+    Keep it True on the OpenAI *transcribe* path: there the word↔time mapping is
+    unknown, so SequenceMatcher can bind an early lyric word to a timestamp from a
+    LATER chorus repeat, and that guard is essential. Set it False on the stable-ts
+    *force-align* path: ``model.align()`` was fed the exact lyrics, so ``timed_words``
+    is already 1:1 in order with ``clean_words`` — there is no misbinding to catch, and
+    the guard's constant-pace drift test instead deletes correct post-gap timestamps
+    (rap intros/breaks legitimately break a constant words-per-second), which
+    ``_interpolate_gaps`` then refills with synthetic timing. That was the source of
+    the verse/post-break drift.
+    """
     clean_norm = [normalize(w) for w in clean_words]
     timed_norm = [normalize(w["word"]) for w in timed_words]
 
@@ -52,7 +65,8 @@ def align(clean_words: list[str], timed_words: list[dict]) -> list[dict]:
                 "end": tw["end"],
             }
 
-    _reject_jump_anchors(aligned)
+    if reject_jumps:
+        _reject_jump_anchors(aligned)
     _interpolate_gaps(aligned, clean_words, timed_words)
     return aligned  # type: ignore[return-value]
 
@@ -274,7 +288,9 @@ def _align_stable(project: VideoProject, *, refresh: bool = False, on_log=None) 
     if not timed_words:
         raise RuntimeError("stable-ts returned no words — cannot align.")
 
-    aligned_flat = align(clean_words, timed_words)
+    # Force-align output is already 1:1 in-order with our lyrics, so skip the
+    # chorus-misbinding guard: it would delete correct post-gap timestamps.
+    aligned_flat = align(clean_words, timed_words, reject_jumps=False)
     lines = build_lines(display_lines, aligned_flat)
     enforce_monotonic(lines)
 
