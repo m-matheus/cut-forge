@@ -25,8 +25,16 @@ def align_words(
     Uses stable-ts ``model.align()`` which phonetically anchors every word in
     ``text`` to the audio — no words are dropped or hallucinated. Much more
     accurate than transcribe() on musical/vocal tracks.
+
+    For beat-heavy rap the raw percussion pulls the alignment off the vocal onset
+    (captions land ~1s late). We isolate the vocal stem with Demucs
+    (``denoiser="demucs"``) so alignment locks onto the singing, and use Silero
+    ``vad`` instead of fragile volume-based silence detection when a beat fills the
+    gaps. ``min_word_dur`` keeps fast bars from being force-widened.
     """
-    cache_key = f"stable-align-{model_name}-{language}"
+    # Version tag bumped when alignment params change so stale caches (produced
+    # before Demucs/VAD) are not silently reused. Bump it again on future tuning.
+    cache_key = f"stable-align-v2-demucs-{model_name}-{language}"
 
     if cache_path and cache_path.exists() and not refresh:
         cached = json.loads(cache_path.read_text(encoding="utf-8"))
@@ -42,10 +50,19 @@ def align_words(
         raise RuntimeError("stable-ts is not installed. Run: pip install -U stable-ts")
 
     if on_log:
-        on_log(f"Force-aligning {audio_path.name} with stable-ts ({model_name})...")
+        on_log(f"Force-aligning {audio_path.name} with stable-ts ({model_name}, "
+               f"Demucs vocal isolation + VAD)...")
 
     model = stable_whisper.load_model(model_name)
-    result = model.align(str(audio_path), text, language=language, suppress_silence=True)
+    result = model.align(
+        str(audio_path),
+        text,
+        language=language,
+        denoiser="demucs",   # isolate the vocal stem so onsets lock to the singing, not the beat
+        vad=True,            # Silero VAD masks instrumental gaps (robust over a constant beat)
+        suppress_silence=True,
+        min_word_dur=0.05,   # don't force-widen fast rap syllables
+    )
 
     out: list[dict] = []
     for seg in result.segments:

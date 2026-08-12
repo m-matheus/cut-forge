@@ -1,16 +1,21 @@
 """Lyric alignment service.
 
-Ports the CRITICAL alignment logic from the old ``align_lyrics.py`` verbatim: clean
-lyrics are mapped onto Whisper's timed words via SequenceMatcher, spurious jump anchors
-(from repeated choruses) are rejected, and gaps are interpolated. This logic was tuned
-against real mixes (the Naruto ES bug where "Kyuubi" froze for 92s) — keep it 1:1.
+Force-aligns known lyrics to the track with stable-ts (``model.align()``), which
+returns word timestamps already 1:1 in-order with our lyrics. Clean lyrics are mapped
+onto those timed words via SequenceMatcher; any word stable-ts failed to emit is filled
+by ``_interpolate_gaps``.
+
+Note: the old chorus-misbinding guard (``_reject_jump_anchors``) and the OpenAI Whisper
+transcribe path were removed — they existed for the cloud *transcribe* backend where the
+word↔time mapping was unknown. With force-alignment the mapping is exact, so that guard
+only deleted correct post-gap timestamps.
 """
 from __future__ import annotations
 
 import re
 from difflib import SequenceMatcher
 
-from cutforge.integrations import stable_whisper_client, whisper_client
+from cutforge.integrations import stable_whisper_client
 from cutforge.models.alignment import Alignment, LyricLine, LyricWord
 from cutforge.models.project import VideoProject
 
@@ -35,20 +40,14 @@ def parse_lyrics(lyrics_text: str) -> list[list[str]]:
     return lines
 
 
-def align(clean_words: list[str], timed_words: list[dict], *,
-          reject_jumps: bool = True) -> list[dict]:
-    """Map clean lyric words onto Whisper's timed words via sequence matching.
+def align(clean_words: list[str], timed_words: list[dict]) -> list[dict]:
+    """Map clean lyric words onto stable-ts's timed words via sequence matching.
 
-    ``reject_jumps`` controls the chorus-misbinding guard (``_reject_jump_anchors``).
-    Keep it True on the OpenAI *transcribe* path: there the word↔time mapping is
-    unknown, so SequenceMatcher can bind an early lyric word to a timestamp from a
-    LATER chorus repeat, and that guard is essential. Set it False on the stable-ts
-    *force-align* path: ``model.align()`` was fed the exact lyrics, so ``timed_words``
-    is already 1:1 in order with ``clean_words`` — there is no misbinding to catch, and
-    the guard's constant-pace drift test instead deletes correct post-gap timestamps
-    (rap intros/breaks legitimately break a constant words-per-second), which
-    ``_interpolate_gaps`` then refills with synthetic timing. That was the source of
-    the verse/post-break drift.
+    ``model.align()`` was fed the exact lyrics, so ``timed_words`` is already 1:1 in
+    order with ``clean_words`` — SequenceMatcher just carries the real timestamps onto
+    the display words, and ``_interpolate_gaps`` fills only the rare word stable-ts
+    failed to emit. No chorus-misbinding guard is needed (or wanted): there is no
+    cross-repeat misbinding to catch when the exact text was the alignment input.
     """
     clean_norm = [normalize(w) for w in clean_words]
     timed_norm = [normalize(w["word"]) for w in timed_words]
@@ -65,55 +64,8 @@ def align(clean_words: list[str], timed_words: list[dict], *,
                 "end": tw["end"],
             }
 
-    if reject_jumps:
-        _reject_jump_anchors(aligned)
     _interpolate_gaps(aligned, clean_words, timed_words)
     return aligned  # type: ignore[return-value]
-
-
-def _reject_jump_anchors(aligned: list, drift_threshold: float = 0.30) -> None:
-    """Drop spurious anchors whose time-position runs far ahead of their lyric-position.
-
-    When lyrics repeat (choruses), Whisper transcribes each repeat and the sequence
-    matcher can bind an EARLY clean word to a timestamp from a LATER repeat. Because
-    matches stay monotonic, that bad anchor drags everything after it forward — the
-    highlight freezes on the jumped word for tens of seconds and the tail lines get
-    crammed into whatever time is left.
-
-    The clean discriminator between a chorus misbinding and a legitimate long
-    instrumental break is DRIFT: for each matched anchor compare its position in the
-    lyrics (index / total) to its position in time (start / span). A chorus misbind
-    drifts far (early lyric word landing deep in the song); an instrumental break only
-    drifts modestly. Any anchor whose |time_frac - lyric_frac| exceeds ``drift_threshold``
-    is dropped so ``_interpolate_gaps`` re-spreads it between trustworthy neighbours.
-    Iterated to stability because dropping one outlier can re-expose the reference pace.
-    """
-    n = len(aligned)
-    if n < 3:
-        return
-
-    changed = True
-    while changed:
-        changed = False
-        idxs = [i for i, a in enumerate(aligned) if a is not None]
-        if len(idxs) < 3:
-            return
-        t0 = aligned[idxs[0]]["start"]
-        t1 = aligned[idxs[-1]]["start"]
-        span_t = (t1 - t0) or 1.0
-        span_i = (idxs[-1] - idxs[0]) or 1
-
-        worst_i, worst_drift = None, drift_threshold
-        for i in idxs:
-            lyric_frac = (i - idxs[0]) / span_i
-            time_frac = (aligned[i]["start"] - t0) / span_t
-            drift = abs(time_frac - lyric_frac)
-            if drift > worst_drift:
-                worst_drift = drift
-                worst_i = i
-        if worst_i is not None:
-            aligned[worst_i] = None
-            changed = True
 
 
 def _median_matched_rate(aligned: list, default: float = 0.35) -> float:
@@ -249,20 +201,13 @@ def enforce_monotonic(lines: list[LyricLine]) -> None:
             line.end = line.words[-1].end
 
 
-def align_project(project: VideoProject, *, refresh: bool = False,
-                  backend: str = "stable", on_log=None) -> Alignment:
+def align_project(project: VideoProject, *, refresh: bool = False, on_log=None) -> Alignment:
     """Align the run's lyrics.txt to its track.mp3 and write lyrics_alignment.json.
 
-    backend='stable' uses stable-whisper (local, precise ~50ms timestamps).
-    backend='openai' uses the OpenAI Whisper API (cloud, ~500ms timestamps).
+    Uses stable-ts force-alignment (local, precise ~50ms timestamps) with Demucs vocal
+    isolation + VAD, passing the exact lyrics text to ``model.align()`` so every word is
+    anchored and none are dropped.
     """
-    if backend == "stable":
-        return _align_stable(project, refresh=refresh, on_log=on_log)
-    return _align_openai(project, refresh=refresh, on_log=on_log)
-
-
-def _align_stable(project: VideoProject, *, refresh: bool = False, on_log=None) -> Alignment:
-    """Alignment via stable-ts force-alignment: passes exact lyrics text to model.align()."""
     if not project.track_path.exists():
         raise FileNotFoundError(f"track.mp3 not found at {project.track_path}")
     if not project.lyrics_path.exists():
@@ -288,9 +233,7 @@ def _align_stable(project: VideoProject, *, refresh: bool = False, on_log=None) 
     if not timed_words:
         raise RuntimeError("stable-ts returned no words — cannot align.")
 
-    # Force-align output is already 1:1 in-order with our lyrics, so skip the
-    # chorus-misbinding guard: it would delete correct post-gap timestamps.
-    aligned_flat = align(clean_words, timed_words, reject_jumps=False)
+    aligned_flat = align(clean_words, timed_words)
     lines = build_lines(display_lines, aligned_flat)
     enforce_monotonic(lines)
 
@@ -304,45 +247,4 @@ def _align_stable(project: VideoProject, *, refresh: bool = False, on_log=None) 
         matched = sum(1 for w in aligned_flat if w is not None)
         on_log(f"Aligned {alignment.line_count} lines, {alignment.word_count} words "
                f"({matched}/{len(clean_words)} directly matched via stable-ts force-alignment)")
-    return alignment
-
-
-def _align_openai(project: VideoProject, *, refresh: bool = False, on_log=None) -> Alignment:
-    """Original alignment via OpenAI Whisper API."""
-    if not project.track_path.exists():
-        raise FileNotFoundError(
-            f"track.mp3 not found at {project.track_path} — add the Suno song first."
-        )
-    if not project.lyrics_path.exists():
-        raise FileNotFoundError(f"lyrics.txt not found at {project.lyrics_path}")
-
-    display_lines = parse_lyrics(project.lyrics_path.read_text(encoding="utf-8"))
-    if not display_lines:
-        raise ValueError("No lyric lines found in lyrics.txt")
-    clean_words = [w for line in display_lines for w in line]
-    if on_log:
-        on_log(f"Parsed {len(display_lines)} lines, {len(clean_words)} words from lyrics.txt")
-
-    timed_words = whisper_client.transcribe_words(
-        project.track_path, cache_path=project.whisper_cache_path,
-        refresh=refresh, prompt=" ".join(clean_words), on_log=on_log,
-    )
-    if not timed_words:
-        raise RuntimeError("Whisper returned no words — cannot align.")
-
-    aligned_flat = align(clean_words, timed_words)
-    lines = build_lines(display_lines, aligned_flat)
-    enforce_monotonic(lines)
-
-    alignment = Alignment(audio=str(project.track_path), lines=lines)
-
-    import json
-    project.audio_dir.mkdir(parents=True, exist_ok=True)
-    project.alignment_path.write_text(
-        json.dumps(alignment.to_json_dict(), indent=2, ensure_ascii=False), encoding="utf-8"
-    )
-    if on_log:
-        matched = sum(1 for w in aligned_flat if w is not None)
-        on_log(f"Aligned {alignment.line_count} lines, {alignment.word_count} words "
-               f"({matched} directly matched to Whisper)")
     return alignment

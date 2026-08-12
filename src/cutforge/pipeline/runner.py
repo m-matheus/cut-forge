@@ -90,7 +90,6 @@ def _execute(step_id: str, project: VideoProject, params: dict, log: LogFn):
         alignment = alignment_service.align_project(
             project,
             refresh=params.get("refresh", False),
-            backend=params.get("backend", "stable"),
             on_log=log)
         return {"lines": alignment.line_count, "words": alignment.word_count}
 

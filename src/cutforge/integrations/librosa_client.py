@@ -1,7 +1,7 @@
 """Rhythm analysis via librosa — BPM, beat grid and onset density.
 
-Lazy-imports librosa (like ``whisper_client``/``anthropic_client`` lazy-import their
-SDKs) so the app boots without paying librosa's heavy import cost until this step runs.
+Lazy-imports librosa (like ``stable_whisper_client``/``anthropic_client`` lazy-import
+their SDKs) so the app boots without paying librosa's heavy import cost until this step runs.
 Output is cached on disk so re-running the reference step doesn't recompute.
 """
 from __future__ import annotations
