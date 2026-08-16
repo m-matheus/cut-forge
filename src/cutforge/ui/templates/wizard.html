@@ -837,7 +837,7 @@ function wizard(runId, initialSteps, saved) {
         const r = await fetch(`/api/runs/${this.runId}/creative-direction/refresh`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ genre: this.chosenGenre, ref_index: this.chosenRefIndex, instruction: this.directionInstruction.trim() }),
+          body: JSON.stringify({ genre: this.chosenGenre, ref_index: this.chosenRefIndex, mode: this.lyricsMode, new_hook: this.newHook, instruction: this.directionInstruction.trim() }),
         });
         if (r.ok) { this.creativeDirection = await r.json(); this.directionInstruction = ''; }
       } finally { this.busy.direction = false; }

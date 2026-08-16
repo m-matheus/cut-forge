@@ -744,11 +744,19 @@ def plan_creative_direction(
     the hook is kept-but-reworded or invented fresh. When ``story_profile`` is given it
     takes precedence over ``structure_profile``.
     """
+    rewrite = story_profile is not None and not story_profile.is_empty()
+    use_structure = (
+        not rewrite and structure_profile is not None and not structure_profile.is_empty()
+    )
+    effective_mode = "rewrite" if rewrite else "structure" if use_structure else "original"
+
     if project.creative_direction_path.exists() and not refresh:
         data = json.loads(project.creative_direction_path.read_text(encoding="utf-8"))
-        return CreativeDirection(**data)
-
-    rewrite = story_profile is not None and not story_profile.is_empty()
+        # Reuse the cache ONLY when it was planned for the SAME mode. A mode switch
+        # (e.g. original → rewrite) must re-plan, or the cached brief keeps pointing
+        # the writer away from the story/structure the new mode is meant to follow.
+        if data.get("planned_mode", "original") == effective_mode:
+            return CreativeDirection(**data)
 
     topic = project.topic or project.character
     lines = []
@@ -792,7 +800,7 @@ def plan_creative_direction(
         ]
         system_prompt = CREATIVE_DIRECTION_REWRITE_SYSTEM_PROMPT
     else:
-        if structure_profile and not structure_profile.is_empty():
+        if use_structure:
             lines += [
                 "",
                 _format_structure_for_prompt(structure_profile),
@@ -812,6 +820,8 @@ def plan_creative_direction(
 
     data = anthropic_client.complete_json(system_prompt, user_prompt)
     direction = CreativeDirection(**data)
+    # Stamp the mode this brief was planned for so a later mode switch invalidates it.
+    direction.planned_mode = effective_mode
 
     project.run_dir.mkdir(parents=True, exist_ok=True)
     project.creative_direction_path.write_text(

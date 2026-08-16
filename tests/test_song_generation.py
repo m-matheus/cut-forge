@@ -243,6 +243,47 @@ def test_creative_direction_is_cached(project, monkeypatch):
     assert len(stub.calls) == 2
 
 
+def test_creative_direction_replanned_on_mode_switch(project, monkeypatch):
+    """Switching lyrics mode must invalidate the cached brief and use the new planner.
+
+    Regression: a direction planned in 'original' mode (unrelated to the reference
+    story) was reused when the user later switched to 'rewrite', so the brief kept
+    pointing the writer away from the story to retell.
+    """
+    from cutforge.models.story import StoryContentProfile, StoryPoint
+
+    _write_reference_profile(project)
+    lore = ReferenceLoreProfile(character="Midoriya")
+    story = StoryContentProfile(
+        character="Midoriya",
+        logline="A quirkless boy inherits power and vows to become the top hero.",
+        story_points=[StoryPoint(order=1, section="Verse 1", point="he is chosen",
+                                 function="setup")],
+    )
+
+    # First plan in the default (original) mode, then re-plan in rewrite mode.
+    stub = _StubAnthropic([_DIRECTION_PAYLOAD, _DIRECTION_PAYLOAD])
+    monkeypatch.setattr(song_service, "anthropic_client", stub)
+
+    d_original = song_service.plan_creative_direction(
+        project, "orchestral trap", lore_profile=lore)
+    assert d_original.planned_mode == "original"
+
+    d_rewrite = song_service.plan_creative_direction(
+        project, "orchestral trap", lore_profile=lore, story_profile=story)
+
+    # The mode switch forced a re-plan (two LLM calls, not one cached).
+    assert len(stub.calls) == 2
+    assert d_rewrite.planned_mode == "rewrite"
+    # The second call used the rewrite planner, not the original one.
+    rewrite_system, _ = stub.calls[1]
+    assert "RE-EXPRESS this fixed story" in rewrite_system
+    # A same-mode re-plan now hits the cache (no third call).
+    song_service.plan_creative_direction(
+        project, "orchestral trap", lore_profile=lore, story_profile=story)
+    assert len(stub.calls) == 2
+
+
 def test_suggest_genres_accepts_no_blend(project, monkeypatch):
     stub = _StubAnthropic([{"character_read": "hero", "directions": [
         {"label": "Epic Trap", "style": "orchestral trap, 112 BPM", "why": "fits"}]}])

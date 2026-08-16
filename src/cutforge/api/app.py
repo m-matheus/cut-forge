@@ -299,14 +299,29 @@ def create_app() -> FastAPI:
             return JSONResponse({"error": "genre is required"}, status_code=400)
         ref_index = int(data.get("ref_index", 0))
         instruction = (data.get("instruction") or "").strip()
+        mode = data.get("mode", "original")
+        new_hook = bool(data.get("new_hook", True))
         project = VideoProject.load(run_id)
-        from cutforge.services import lore_service, reference_service
+        from cutforge.services import (
+            lore_service, reference_service, story_service, structure_service,
+        )
         music_profile = reference_service.load_reference_profile(project, index=ref_index)
         all_lores = lore_service.load_all_lore_profiles(project)
         lore_profile = lore_service.merge_lore_profiles(all_lores)
+        # Carry the selected lyrics mode so the brief uses the matching planner
+        # (rewrite/structure/original). Without this the refresh always fell back to
+        # the original-song planner, producing a direction unrelated to the story.
+        structure_profile = None
+        story_profile = None
+        if mode == "structure":
+            structure_profile = structure_service.load_structure_profile(project)
+        elif mode == "rewrite":
+            story_profile = story_service.load_story_profile(project)
         direction = song_service.plan_creative_direction(
             project, genre,
             music_profile=music_profile, lore_profile=lore_profile,
+            structure_profile=structure_profile, story_profile=story_profile,
+            new_hook=new_hook,
             user_instruction=instruction,
             refresh=True,
         )

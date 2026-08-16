@@ -35,6 +35,10 @@ class CreativeDirection(BaseModel):
     original_metaphor_direction: str = ""
     delivery_personality: str = ""
     things_to_avoid: list[str] = Field(default_factory=list)
+    # Which lyrics mode this brief was planned for ("original" | "structure" | "rewrite").
+    # Used to invalidate the cached direction when the user switches modes. Set by the
+    # planner, never by the LLM's JSON output.
+    planned_mode: str = ""
 
 
 class SongPackage(BaseModel):
