@@ -185,7 +185,7 @@ recognise the STRUCTURE but hear nothing lifted — every line is your own.
 _REWRITE_RULES = """\
 REWRITE THE STORY — SAME STORY, NEW EXPRESSION
 This song deliberately RE-TELLS a story reverse-engineered from reference songs about
-this character (the STORY TO RETELL block below). The user sent 2–3 raps that tell the
+this character (the STORY TO RETELL block below). The user sent 1–3 raps that tell the
 SAME story with different rhymes and rhythms, and wants a NEW rap that keeps that story
 and its ideas but is written fresh. You are doing exactly that: same story, new words.
 
@@ -358,8 +358,7 @@ def _format_story_for_prompt(story: StoryContentProfile, *, new_hook: bool) -> s
 # ---------------------------------------------------------------------------
 
 SUGGEST_SYSTEM_PROMPT_BASE = f"""\
-You are a producer for an anime-rap channel in the lane of BASARA, M4RKIM, ANIRAP,
-Rustage and 7 Minutoz. Given a character (or matchup), propose distinct GENRE/VIBE
+You are a producer for an anime-rap channel in the lane of BASARA, MHRAP, Tauz M4RKIM, ANIRAP and 7 Minutoz. Given a character (or matchup), propose distinct GENRE/VIBE
 directions for an original song.
 
 {_SUNO_STYLE_RULES}
@@ -425,7 +424,7 @@ OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
   "emotional_arc": "how the feeling evolves across the song",
   "hook_concept": "an ORIGINAL hook idea — the concept, not finished lyrics",
   "key_lore_points": ["specific facts/abilities/easter eggs to weave in", "..."],
-  "original_metaphor_direction": "a fresh metaphor world to invent lines from",
+  "original_metaphor_direction": "a fresh metaphor world grounded in the CHARACTER'S OWN thematic world — their abilities, history, relationships, genre tropes. One concrete metaphor system in 1-2 sentences.",
   "delivery_personality": "the rap persona/attitude and cadence feel",
   "things_to_avoid": ["reference's hook/metaphors/phrasing", "generic clichés", "..."]
 }
@@ -438,7 +437,7 @@ Return ONLY the JSON object.
 # delivery, and the hook decision.
 CREATIVE_DIRECTION_REWRITE_SYSTEM_PROMPT = """\
 You are a creative director for an anime-rap channel (BASARA / M4RKIM / Rustage lane).
-The channel has 2–3 reference raps that tell the SAME story about a character, and wants
+The channel has 1–3 reference raps that tell the SAME story about a character, and wants
 a NEW rap that KEEPS that story and its ideas but is re-written with different rhymes, a
 different rhythm and (optionally) a different hook.
 
@@ -466,7 +465,7 @@ OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
   "emotional_arc": "the arc from the STORY block (kept; may be phrased in your words)",
   "hook_concept": "the hook idea to use — kept-but-reworded, or brand-new if requested",
   "key_lore_points": ["specific facts/ideas to weave in while retelling", "..."],
-  "original_metaphor_direction": "a FRESH metaphor world to re-write lines from",
+  "original_metaphor_direction": "a FRESH metaphor world grounded in the CHARACTER'S OWN thematic world — their abilities, history, relationships, genre tropes. One concrete metaphor system in 1-2 sentences.",
   "delivery_personality": "the rap persona/attitude and cadence feel",
   "things_to_avoid": ["reference's exact wording/rhymes/hook", "line-by-line mirroring", "generic clichés", "..."]
 }
@@ -531,6 +530,11 @@ Keep it short (3–6 terms).
 LYRICS STRUCTURE
 Write AT LEAST ~2.5 minutes of material. A reliable arrangement:
   [Intro] → [Verse 1] → [Chorus] → [Verse 2] → [Chorus] → [Bridge] → [Verse 3] → [Outro]
+[Intro] style — always open with a [Spoken] label/producer shoutout tag: if a "Channel
+name" is given in the user prompt, use it (e.g. "Enkai again...", "another one from
+Enkai...", "Enkai, let's go..."). Follow with 1-2 short character-specific hype lines
+(who this song is about / what they represent). 3-4 lines total — entry moment, NOT a
+metaphor section, NOT verse content.
 This is a STARTING POINT — adapt to the genre/reference's own arrangement:
   - Drop-driven beat → [Build] then [Drop] timed to the character's signature moment.
   - Emotional / melodic → fewer, sung-heavy hooks; maybe [Instrumental Break]; drop the
@@ -545,7 +549,10 @@ TONE & CONTENT
   through vivid, specific, ORIGINAL imagery. Not a plot summary — a hype anthem.
 - Turn the mined lore, abilities and easter eggs into fresh metaphors and punchlines of
   your own invention — never a restatement of how the reference phrased them.
-- Do NOT use trademarked catchphrases verbatim; evoke them instead.
+- Canonical ability/technique/form names (jutsu, powers, transformations — e.g. "Mangekyou
+  Sharingan", "Amaterasu", "Rasengan", "Bankai") MUST appear verbatim — fans expect to hear
+  the exact name and it is a mark of authenticity. What you EVOKE instead: the reference's
+  own hook phrasing and lyrical catchphrases — rewrite those; keep canonical names.
 - Keep it hype and quotable — the hook should be something viewers scream in the comments.
 
 LINE RULES (lyrics also become on-screen karaoke captions)
@@ -934,6 +941,8 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
         lines.append(f"Character name(s): {project.character}")
     if project.anime:
         lines.append(f"Anime: {project.anime}")
+    if project.channel_slug:
+        lines.append(f"Channel name: {project.channel_slug.replace('-', ' ').title()}")
     if is_vs:
         lines.append(
             "This is a VS / matchup song — alternate perspectives and make the chorus the clash."
