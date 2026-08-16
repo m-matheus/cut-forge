@@ -25,7 +25,7 @@ OUTPUT FORMAT — return ONLY raw JSON, no markdown fences, no prose:
 LANGUAGE:
 Write ALL fields in the requested language: "en", "es", or "pt" (Brazilian
 Portuguese). If none is given, default to "en". Translate the words but NEVER
-restructure — the 4-part description order and the FICHA TÉCNICA block are
+restructure — the 4-part description order and the CREDITS block are
 identical in every language.
 
 ABSOLUTE RULES:
@@ -60,16 +60,16 @@ PART 2 — Character / song line (ONE sentence):
   capture the vibe using {mood} (e.g. "dark and vengeful", written from the
   character's side of the story).
 
-PART 3 — FICHA TÉCNICA / CREDITS (label-style block, identical structure in all
+PART 3 — CREDITS (label-style block, identical structure in all
   languages, wrapped in the ━ separators). All roles are Enkai:
   ━━━━━━━━━━━━━━━━━━━━
-  🎤 FICHA TÉCNICA / CREDITS
+  🎤 CREDITS
   Song: "{song}"
   Character: {character} ({anime})
   Written by: Enkai
   Produced by: Enkai
   Mixed & mastered by: Enkai
-  Vocals: Enkai
+  
   ━━━━━━━━━━━━━━━━━━━━
   (Translate only the labels — e.g. es "Escrito por / Producido por /
   Mezcla y máster por / Voces"; pt "Escrito por / Produzido por /
