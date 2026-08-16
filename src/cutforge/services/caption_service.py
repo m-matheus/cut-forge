@@ -106,7 +106,7 @@ def build_srt(lines: list[LyricLine], *, max_chunk_duration: float = 1.5,
     #   CHAIN_GAP — if the next caption starts within this, hold until it so
     #               back-to-back lines chain seamlessly (no blank flicker).
     #   MIN_DUR   — floor so very short chunks stay readable (never overlapping next).
-    TAIL_HOLD = 0.4
+    TAIL_HOLD = 0.2
     CHAIN_GAP = 0.7
     MIN_DUR = 0.8
 
