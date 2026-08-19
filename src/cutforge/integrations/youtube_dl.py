@@ -4,6 +4,9 @@ Ported from the old ``fetch_amv.py`` but WITHOUT scene splitting — CutForge do
 the source clip whole and the user cuts it in Premiere. Uses the yt-dlp module via the
 current interpreter (no external binary assumption beyond ffmpeg for stream merge, which
 yt-dlp locates on PATH if present).
+
+Authentication: set YOUTUBE_COOKIES_FILE in .env pointing to a Netscape-format cookies
+file exported from a logged-in browser (e.g. via "Get cookies.txt LOCALLY" extension).
 """
 from __future__ import annotations
 
@@ -15,43 +18,51 @@ from pathlib import Path
 
 YT_DLP = [sys.executable, "-m", "yt_dlp"]
 
-# ---------------------------------------------------------------------------
-# bgutil PO Token provider (script mode, Deno runtime)
-#
-# YouTube requires Proof-of-Origin (PO) Tokens for most player clients on
-# flagged IPs. yt-dlp cannot generate them natively. bgutil-ytdlp-pot-provider
-# (pip package) hooks into yt-dlp's getpot API and mints tokens on demand via
-# the TypeScript server bundled at tools/bgutil/.
-#
-# Script mode: each token request spawns a short-lived `deno run` process — no
-# persistent server needed.  The args below are injected into every command
-# that fetches video/audio data.  Subtitle commands use web_embedded (a
-# no-token client) so they are exempt.
-#
-# Setup: `git submodule update --init` populates tools/bgutil after cloning.
-# ---------------------------------------------------------------------------
-_PROJECT_ROOT = Path(__file__).resolve().parents[3]
-_BGUTIL_HOME = _PROJECT_ROOT / "tools" / "bgutil"
-_BGUTIL_ARGS: list[str] = (
-    ["--extractor-args", f"youtubepot-bgutilscript:server_home={_BGUTIL_HOME}"]
-    if _BGUTIL_HOME.exists() else []
-)
+# EJS solver: downloaded once from GitHub and cached locally. Required to solve
+# YouTube's n-challenge (without it, all https formats are blocked).
+_EJS = ["--remote-components", "ejs:github"]
 
-# YouTube's DEFAULT player client (an Android variant) hides the channel's MANUAL
-# subtitle tracks in environments without a JavaScript runtime — it only exposes the
-# ``live_chat`` replay. The ``web_embedded`` client lists and serves the real manual
-# subtitles regardless. ``--ignore-no-formats-error`` is required alongside it because
-# yt-dlp still resolves (and here fails to find, without a JS runtime) a video format
-# even under ``--skip-download``; without the flag it aborts before writing the subs.
+# web_embedded lists manual subtitle tracks without needing video formats or cookies.
 _SUB_CLIENT_ARGS = ["--extractor-args", "youtube:player_client=web_embedded"]
+
+# Disable bgutil pip plugin if installed (avoids Deno startup overhead on every call).
+_NO_BGUTIL = ["--extractor-args", "youtubepot-bgutilscript:server_home=/nonexistent"]
+
+
+def _cookies_args() -> list[str]:
+    """Return --cookies <path> from settings, or raise if not configured."""
+    try:
+        from cutforge.config.settings import get_settings
+        path = get_settings().youtube_cookies_file
+        if path:
+            return ["--cookies", path]
+    except Exception:
+        pass
+    raise RuntimeError(
+        "YOUTUBE_COOKIES_FILE is not set. Add it to your .env file pointing to a "
+        "Netscape cookies file exported from a YouTube-logged-in browser."
+    )
+
+
+def _dl_args() -> list[str]:
+    """Base args for all video/audio download commands."""
+    return _EJS + _NO_BGUTIL + ["--extractor-args", "youtube:player_client=web"] + _cookies_args()
+
+
+def _run_ytdlp(cmd: list[str]) -> subprocess.CompletedProcess:
+    """Run a yt-dlp command, re-raising failures with yt-dlp's actual stderr."""
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", check=True)
+    except subprocess.CalledProcessError as exc:
+        stderr = (exc.stderr or "").strip()
+        raise RuntimeError(
+            f"yt-dlp failed (exit {exc.returncode}): {stderr or '(no stderr)'}"
+        ) from None
 
 
 def probe(url: str) -> dict:
     """Fetch video metadata without downloading."""
-    result = subprocess.run(
-        YT_DLP + _BGUTIL_ARGS + ["--dump-json", "--no-playlist", url],
-        capture_output=True, text=True, encoding="utf-8", check=True,
-    )
+    result = _run_ytdlp(YT_DLP + _dl_args() + ["--dump-json", "--no-playlist", url])
     info = json.loads(result.stdout)
     return {
         "url": url,
@@ -74,10 +85,9 @@ def list_manual_subtitles(url: str) -> list[dict]:
     text) that YouTube exposes under ``subtitles``, never an actual caption track. Tracks
     that offer no text format (vtt/srt/ttml) are dropped for the same reason.
     """
-    result = subprocess.run(
-        YT_DLP + _SUB_CLIENT_ARGS
-        + ["--dump-json", "--ignore-no-formats-error", "--no-playlist", url],
-        capture_output=True, text=True, encoding="utf-8", check=True,
+    result = _run_ytdlp(
+        YT_DLP + _SUB_CLIENT_ARGS + _cookies_args()
+        + ["--dump-json", "--ignore-no-formats-error", "--no-playlist", url]
     )
     info = json.loads(result.stdout)
     subs = info.get("subtitles") or {}
@@ -115,7 +125,7 @@ def download(url: str, dest: Path, *, on_log=None) -> dict:
     # serves inside .mp4 containers — so an [ext=mp4] filter alone lets AV1 through and the
     # clip imports as "Media offline". avc1 is universally supported. Fall back to any mp4
     # (then anything) only if no H.264 rendition exists.
-    cmd = YT_DLP + _BGUTIL_ARGS + [
+    cmd = YT_DLP + _dl_args() + [
         "-f", "bestvideo[vcodec^=avc1][height<=1080]+bestaudio[ext=m4a]/"
               "best[vcodec^=avc1][height<=1080]/best[ext=mp4][height<=1080]/best",
         "--merge-output-format", "mp4",
@@ -147,7 +157,7 @@ _VTT_CUE_INDEX = re.compile(r"^\d+$")
 # Any inline/markup tag: <c>, </c>, <c.colorXXXX>, <b>, </b>, karaoke <00:00:01.234>, etc.
 _VTT_ANY_TAG = re.compile(r"<[^>]*>")
 # Zero-width & non-breaking spacing that animated captions inject between glyphs.
-_VTT_ZERO_WIDTH = re.compile(r"[​‌‍﻿ ]")
+_VTT_ZERO_WIDTH = re.compile(r"[​‌‍﻿ ]")
 _WS_RUN = re.compile(r"\s+")
 
 
@@ -213,7 +223,7 @@ def download_subtitles(url: str, out_dir: Path, *, lang: str = "en", on_log=None
     log = on_log or (lambda _m: None)
     out_dir.mkdir(parents=True, exist_ok=True)
     out_template = str(out_dir / "%(id)s.%(ext)s")
-    cmd = YT_DLP + _SUB_CLIENT_ARGS + [
+    cmd = YT_DLP + _SUB_CLIENT_ARGS + _cookies_args() + [
         "--write-subs",
         "--skip-download",
         "--ignore-no-formats-error",
@@ -261,7 +271,7 @@ def download_audio(url: str, dest: Path, *, audio_format: str = "mp3", on_log=No
 
     # -x rewrites the output extension, so template with %(ext)s and point at the stem.
     out_template = str(dest.with_suffix(f".%(ext)s"))
-    cmd = YT_DLP + _BGUTIL_ARGS + [
+    cmd = YT_DLP + _dl_args() + [
         "-x",
         "--audio-format", audio_format,
         "--audio-quality", "0",

@@ -65,6 +65,12 @@ class Settings(BaseSettings):
     # --- Paths ---
     output_base_dir: str = "output"
 
+    # --- YouTube ---
+    # Optional path to a Netscape-format cookies file exported from a logged-in browser
+    # (e.g. via the "Get cookies.txt LOCALLY" extension). Required for age-restricted or
+    # members-only videos. Set YOUTUBE_COOKIES_FILE=/path/to/cookies.txt in .env.
+    youtube_cookies_file: str | None = None
+
     @property
     def project_root(self) -> Path:
         return PROJECT_ROOT
