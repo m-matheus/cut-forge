@@ -26,6 +26,36 @@ def _make_client():
     )
 
 
+def _fix_control_chars(s: str) -> str:
+    """Escape raw control characters that appear literally inside JSON string values.
+
+    Claude occasionally emits a bare newline mid-word inside a string (e.g. the
+    word wraps at a column boundary), producing invalid JSON. This walks the text
+    character-by-character to replace control characters only inside string literals.
+    """
+    result = []
+    in_string = False
+    escaped = False
+    replacements = {"\n": "\\n", "\r": "\\r", "\t": "\\t"}
+    for ch in s:
+        if escaped:
+            result.append(ch)
+            escaped = False
+        elif in_string and ch == "\\":
+            result.append(ch)
+            escaped = True
+        elif ch == '"':
+            result.append(ch)
+            in_string = not in_string
+        elif in_string and ch in replacements:
+            result.append(replacements[ch])
+        elif in_string and ord(ch) < 0x20:
+            result.append(f"\\u{ord(ch):04x}")
+        else:
+            result.append(ch)
+    return "".join(result)
+
+
 def _strip_fences(raw: str) -> str:
     raw = raw.strip()
     if raw.startswith("```"):
@@ -63,7 +93,7 @@ def complete_json(
         output_config={"effort": effort},
     )
     text = next((b.text for b in response.content if b.type == "text"), "")
-    cleaned = _strip_fences(text)
+    cleaned = _fix_control_chars(_strip_fences(text))
     try:
         return json.loads(cleaned)
     except json.JSONDecodeError as exc:
