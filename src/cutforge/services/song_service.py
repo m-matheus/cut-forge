@@ -249,8 +249,10 @@ def _format_lore_for_prompt(lore: ReferenceLoreProfile) -> str:
         parts.append(f"- Personality traits: {', '.join(lore.personality_traits)}")
     if lore.author_interpretations:
         parts.append(
-            "- The reference composer's OWN takes (context only — do NOT reuse these as "
-            "your own angle): " + "; ".join(lore.author_interpretations)
+            "- The reference's THEMATIC UNIVERSE — the metaphor world and artistic lens "
+            "it uses to see this character (your new metaphors should feel at home in this "
+            "same territory; extend, invert or zoom into it — just express it differently): "
+            + "; ".join(lore.author_interpretations)
         )
     if lore.uncertain_items:
         parts.append(
@@ -424,7 +426,7 @@ OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
   "emotional_arc": "how the feeling evolves across the song",
   "hook_concept": "an ORIGINAL hook idea — the concept, not finished lyrics",
   "key_lore_points": ["specific facts/abilities/easter eggs to weave in", "..."],
-  "original_metaphor_direction": "a fresh metaphor world grounded in the CHARACTER'S OWN thematic world — their abilities, history, relationships, genre tropes. One concrete metaphor system in 1-2 sentences.",
+  "original_metaphor_direction": "a NEW ANGLE within the reference's established thematic universe — extend, invert or zoom into the same conceptual territory the reference inhabits. Do NOT depart into a completely different metaphor world; stay in the same thematic space but express it with fresh language. One concrete metaphor system in 1-2 sentences.",
   "delivery_personality": "the rap persona/attitude and cadence feel",
   "things_to_avoid": ["reference's hook/metaphors/phrasing", "generic clichés", "..."]
 }
