@@ -15,6 +15,28 @@ from pathlib import Path
 
 YT_DLP = [sys.executable, "-m", "yt_dlp"]
 
+# ---------------------------------------------------------------------------
+# bgutil PO Token provider (script mode, Deno runtime)
+#
+# YouTube requires Proof-of-Origin (PO) Tokens for most player clients on
+# flagged IPs. yt-dlp cannot generate them natively. bgutil-ytdlp-pot-provider
+# (pip package) hooks into yt-dlp's getpot API and mints tokens on demand via
+# the TypeScript server bundled at tools/bgutil/.
+#
+# Script mode: each token request spawns a short-lived `deno run` process — no
+# persistent server needed.  The args below are injected into every command
+# that fetches video/audio data.  Subtitle commands use web_embedded (a
+# no-token client) so they are exempt.
+#
+# Setup: `git submodule update --init` populates tools/bgutil after cloning.
+# ---------------------------------------------------------------------------
+_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_BGUTIL_HOME = _PROJECT_ROOT / "tools" / "bgutil"
+_BGUTIL_ARGS: list[str] = (
+    ["--extractor-args", f"youtubepot-bgutilscript:server_home={_BGUTIL_HOME}"]
+    if _BGUTIL_HOME.exists() else []
+)
+
 # YouTube's DEFAULT player client (an Android variant) hides the channel's MANUAL
 # subtitle tracks in environments without a JavaScript runtime — it only exposes the
 # ``live_chat`` replay. The ``web_embedded`` client lists and serves the real manual
@@ -27,7 +49,7 @@ _SUB_CLIENT_ARGS = ["--extractor-args", "youtube:player_client=web_embedded"]
 def probe(url: str) -> dict:
     """Fetch video metadata without downloading."""
     result = subprocess.run(
-        YT_DLP + ["--dump-json", "--no-playlist", url],
+        YT_DLP + _BGUTIL_ARGS + ["--dump-json", "--no-playlist", url],
         capture_output=True, text=True, encoding="utf-8", check=True,
     )
     info = json.loads(result.stdout)
@@ -93,7 +115,7 @@ def download(url: str, dest: Path, *, on_log=None) -> dict:
     # serves inside .mp4 containers — so an [ext=mp4] filter alone lets AV1 through and the
     # clip imports as "Media offline". avc1 is universally supported. Fall back to any mp4
     # (then anything) only if no H.264 rendition exists.
-    cmd = YT_DLP + [
+    cmd = YT_DLP + _BGUTIL_ARGS + [
         "-f", "bestvideo[vcodec^=avc1][height<=1080]+bestaudio[ext=m4a]/"
               "best[vcodec^=avc1][height<=1080]/best[ext=mp4][height<=1080]/best",
         "--merge-output-format", "mp4",
@@ -212,6 +234,10 @@ def download_subtitles(url: str, out_dir: Path, *, lang: str = "en", on_log=None
         if line:
             log(line)
     process.wait()
+    if process.returncode != 0:
+        raise RuntimeError(
+            f"yt-dlp subtitle download failed (exit {process.returncode}) for {url}"
+        )
     # A missing manual sub is not an error here — yt-dlp just writes nothing.
     vtt_files = sorted(out_dir.glob("*.vtt"))
     if not vtt_files:
@@ -235,7 +261,7 @@ def download_audio(url: str, dest: Path, *, audio_format: str = "mp3", on_log=No
 
     # -x rewrites the output extension, so template with %(ext)s and point at the stem.
     out_template = str(dest.with_suffix(f".%(ext)s"))
-    cmd = YT_DLP + [
+    cmd = YT_DLP + _BGUTIL_ARGS + [
         "-x",
         "--audio-format", audio_format,
         "--audio-quality", "0",
