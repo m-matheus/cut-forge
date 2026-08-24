@@ -249,9 +249,12 @@ def _format_lore_for_prompt(lore: ReferenceLoreProfile) -> str:
         parts.append(f"- Personality traits: {', '.join(lore.personality_traits)}")
     if lore.author_interpretations:
         parts.append(
-            "- The reference's THEMATIC UNIVERSE — the metaphor world and artistic lens "
-            "it uses to see this character (your new metaphors should feel at home in this "
-            "same territory; extend, invert or zoom into it — just express it differently): "
+            "- The reference's THEMATIC UNIVERSE — the artistic lens it uses to see this "
+            "character. Use it ONLY to understand the character's themes; do NOT copy its "
+            "metaphor domain. Your own metaphors must still be sourced from the character's "
+            "in-world reality (powers, techniques, weapons, the anime's own imagery), NEVER "
+            "from abstract real-world domains (legal/estate/will, finance/debt/ledger/rent/"
+            "lease, corporate, sports, cooking, gambling): "
             + "; ".join(lore.author_interpretations)
         )
     if lore.uncertain_items:
@@ -419,6 +422,17 @@ structure) and any clichés that would make the song generic.
 Prefer specific, character-grounded ideas over generic hype. If strong easter eggs /
 obscure lore exist, prioritise them — they make the song feel authentic and specific.
 
+NON-NEGOTIABLE — METAPHOR SOURCING: The metaphor world must be built from the character's
+OWN universe — their powers, techniques, forms, weapons, gear, creatures, locations and the
+source material's own imagery. You may NOT translate the character's story into an unrelated
+real-world domain. Specifically BANNED as metaphor systems (unless the character literally
+lives in that world): legal/courtroom (wills, estates, deeds, inheritance law, verdicts,
+contracts), finance/accounting (debt, ledgers, rent, leases, invoices, interest),
+corporate/business, sports, cooking, and gambling. Abstract themes like 'inheritance',
+'legacy', 'debt of hatred' or 'destiny' are allowed as IDEAS but must be voiced through
+concrete in-world imagery — blood, the awakened eye, the clan's fire, the scratched
+headband — never through paperwork, money, property or contracts.
+
 OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
 {
   "core_theme": "the central idea of the NEW song, in one line",
@@ -426,7 +440,7 @@ OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
   "emotional_arc": "how the feeling evolves across the song",
   "hook_concept": "an ORIGINAL hook idea — the concept, not finished lyrics",
   "key_lore_points": ["specific facts/abilities/easter eggs to weave in", "..."],
-  "original_metaphor_direction": "a NEW ANGLE within the reference's established thematic universe — extend, invert or zoom into the same conceptual territory the reference inhabits. Do NOT depart into a completely different metaphor world; stay in the same thematic space but express it with fresh language. One concrete metaphor system in 1-2 sentences.",
+  "original_metaphor_direction": "A NEW angle within the reference's thematic universe, but the IMAGERY must be sourced ONLY from the character's actual in-world reality — their canonical powers, techniques, weapons, transformations, creatures, locations and the anime's own objects and visuals. Every governing image MUST literally exist in the character's world. HARD BAN: never build the metaphor system out of abstract real-world domains the character does not inhabit — no legal/court/estate/will/inheritance-law, no finance/debt/ledger/rent/lease/accounting, no corporate/business, no sports, no cooking, no gambling — unless the character literally comes from that world. Render even abstract themes (legacy, inheritance, destiny) through concrete in-world objects, not through paperwork, money or contracts. One concrete in-world metaphor system in 1-2 sentences.",
   "delivery_personality": "the rap persona/attitude and cadence feel",
   "things_to_avoid": ["reference's hook/metaphors/phrasing", "generic clichés", "..."]
 }
@@ -460,6 +474,17 @@ references, the delivery personality, and the hook decision (respect whether a n
 was requested). In "things_to_avoid", explicitly include lifting or lightly paraphrasing
 the reference's wording, rhymes or hook, and any clichés.
 
+NON-NEGOTIABLE — METAPHOR SOURCING: The metaphor world must be built from the character's
+OWN universe — their powers, techniques, forms, weapons, gear, creatures, locations and the
+source material's own imagery. You may NOT translate the character's story into an unrelated
+real-world domain. Specifically BANNED as metaphor systems (unless the character literally
+lives in that world): legal/courtroom (wills, estates, deeds, inheritance law, verdicts,
+contracts), finance/accounting (debt, ledgers, rent, leases, invoices, interest),
+corporate/business, sports, cooking, and gambling. Abstract themes like 'inheritance',
+'legacy', 'debt of hatred' or 'destiny' are allowed as IDEAS but must be voiced through
+concrete in-world imagery — blood, the awakened eye, the clan's fire, the scratched
+headband — never through paperwork, money, property or contracts.
+
 OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
 {
   "core_theme": "the story's central idea (kept from the STORY block, in one line)",
@@ -467,7 +492,7 @@ OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
   "emotional_arc": "the arc from the STORY block (kept; may be phrased in your words)",
   "hook_concept": "the hook idea to use — kept-but-reworded, or brand-new if requested",
   "key_lore_points": ["specific facts/ideas to weave in while retelling", "..."],
-  "original_metaphor_direction": "a FRESH metaphor world grounded in the CHARACTER'S OWN thematic world — their abilities, history, relationships, genre tropes. One concrete metaphor system in 1-2 sentences.",
+  "original_metaphor_direction": "A concrete metaphor SYSTEM sourced ONLY from the character's actual in-world reality — their canonical powers, techniques, transformations, weapons, creatures, locations, objects, and the anime's own visual imagery (for a Naruto shinobi: the Sharingan, Amaterasu, chakra, jutsu, kunai/shuriken, the clan crest, the Hidden Leaf). Every governing image MUST be something that literally exists in this character's world. HARD BAN: do NOT build the metaphor system out of abstract real-world domains the character does not literally inhabit — no legal/court/estate/will/inheritance-law imagery, no finance/debt/ledger/rent/lease/accounting imagery, no corporate/business, no sports, no cooking, no gambling. A thematically correct idea such as 'inheritance of hatred' must be expressed through in-world objects (blood, bloodline, the awakened eye, the clan's undying fire) — NEVER through wills, estates, ledgers, rent or leases. Exception: only use a real-world domain if the character literally comes from it (e.g. a chef character may use cooking imagery). Give ONE concrete in-world metaphor system in 1-2 sentences.",
   "delivery_personality": "the rap persona/attitude and cadence feel",
   "things_to_avoid": ["reference's exact wording/rhymes/hook", "line-by-line mirroring", "generic clichés", "..."]
 }
@@ -551,6 +576,12 @@ TONE & CONTENT
   through vivid, specific, ORIGINAL imagery. Not a plot summary — a hype anthem.
 - Turn the mined lore, abilities and easter eggs into fresh metaphors and punchlines of
   your own invention — never a restatement of how the reference phrased them.
+- Every metaphor and comparison must be drawn from the character's own world (their powers,
+  techniques, weapons, and the anime's own objects and imagery). Do NOT reach for abstract
+  real-world metaphor domains — legal/estate/will, finance/debt/ledger/rent/lease, corporate,
+  sports, cooking, gambling — unless the character literally belongs to that world. If a theme
+  is abstract (legacy, inheritance, destiny), picture it as an in-world object before you
+  write the line.
 - Canonical ability/technique/form names (jutsu, powers, transformations — e.g. "Mangekyou
   Sharingan", "Amaterasu", "Rasengan", "Bankai") MUST appear verbatim — fans expect to hear
   the exact name and it is a mark of authenticity. What you EVOKE instead: the reference's
