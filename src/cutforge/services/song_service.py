@@ -557,11 +557,20 @@ Keep it short (3–6 terms).
 LYRICS STRUCTURE
 Write AT LEAST ~2.5 minutes of material. A reliable arrangement:
   [Intro] → [Verse 1] → [Chorus] → [Verse 2] → [Chorus] → [Bridge] → [Verse 3] → [Outro]
-[Intro] style — always open with a [Spoken] label/producer shoutout tag: if a "Channel
-name" is given in the user prompt, use it (e.g. "Enkai again...", "another one from
-Enkai...", "Enkai, let's go..."). Follow with 1-2 short character-specific hype lines
-(who this song is about / what they represent). 3-4 lines total — entry moment, NOT a
-metaphor section, NOT verse content.
+[Intro] style — open with a [Spoken] producer shoutout tag that is JUST the channel-name
+call-out and NOTHING more: if a "Channel name" is given in the user prompt, say it plainly
+(e.g. "Enkai again...", "another one from Enkai...", "Enkai, let's go..."). Do NOT dress the
+tag up — no "one more for the archive", no "a ritual I can't stop performing", no metaphor,
+no poetry; it is only the artist saying their name. Then follow with 1-2 SHORT, plain hype
+lines that name who the song is about and what they represent (e.g. "This one's for the last
+Uchiha", "Sasuke, the avenger"). 3-4 lines total — a quick entry moment, NOT a metaphor
+section, NOT verse content.
+The channel name is the ARTIST / producer tag ONLY. It is NOT the character, NOT a person in
+the story, and must appear ONLY inside this [Intro] tag — NEVER in a verse, chorus, pre-chorus,
+bridge or [Outro], and NEVER spoken as if it were the character or part of their world.
+[Outro] style — a short closing beat in the CHARACTER's own voice (or about them): a final
+vow, image or callback drawn from THEIR world (their powers, clan, arc). Do NOT put the
+channel name / producer tag here — that belongs only in the [Intro].
 This is a STARTING POINT — adapt to the genre/reference's own arrangement:
   - Drop-driven beat → [Build] then [Drop] timed to the character's signature moment.
   - Emotional / melodic → fewer, sung-heavy hooks; maybe [Instrumental Break]; drop the
