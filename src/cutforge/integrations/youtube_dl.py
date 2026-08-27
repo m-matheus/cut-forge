@@ -126,8 +126,8 @@ def download(url: str, dest: Path, *, on_log=None) -> dict:
     # clip imports as "Media offline". avc1 is universally supported. Fall back to any mp4
     # (then anything) only if no H.264 rendition exists.
     cmd = YT_DLP + _dl_args() + [
-        "-f", "bestvideo[vcodec^=avc1][height<=1080]+bestaudio[ext=m4a]/"
-              "best[vcodec^=avc1][height<=1080]/best[ext=mp4][height<=1080]/best",
+        "-f", "bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/"
+              "best[vcodec^=avc1]/best[ext=mp4]/best",
         "--merge-output-format", "mp4",
         "-o", str(dest),
         "--no-playlist",
