@@ -46,7 +46,7 @@ def _cookies_args() -> list[str]:
 
 def _dl_args() -> list[str]:
     """Base args for all video/audio download commands."""
-    return _EJS + _NO_BGUTIL + ["--extractor-args", "youtube:player_client=web"] + _cookies_args()
+    return _EJS + _NO_BGUTIL + _cookies_args()
 
 
 def _run_ytdlp(cmd: list[str]) -> subprocess.CompletedProcess:
