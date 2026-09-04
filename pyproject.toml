@@ -16,7 +16,7 @@ dependencies = [
     "openai>=1.30.0",
     "elevenlabs>=1.0.0",
     # Footage download
-    "yt-dlp>=2025.05.22",
+    "yt-dlp>=2026.8.19",
     # Editable timeline export (Premiere reads FCP7 XML)
     "opentimelineio>=0.15.0",
     "otio-fcp-adapter>=1.0.0",

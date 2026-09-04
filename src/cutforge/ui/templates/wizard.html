@@ -537,10 +537,19 @@
 
                 <div style="display:flex;gap:.5rem;align-items:center">
                   <input placeholder="URL do YouTube (AMV / edit)" x-model="newFootageUrl" style="flex:1;margin:0">
+                  <select x-model="footageQuality" style="width:auto;margin:0" :disabled="running"
+                          title="edit: melhor H.264 nativo (sem re-encode, geralmente 1080p). max: maior resolucao disponivel (1440p/2160p VP9/AV1) transcodificada para H.264.">
+                    <option value="edit">1080p H.264</option>
+                    <option value="max">Máx. resolução</option>
+                  </select>
                   <button @click="addFootage()"
                           :disabled="!newFootageUrl || running"
                           :aria-busy="running && current==='footage'">Baixar</button>
                 </div>
+                <p style="margin-top:.4rem"><small x-show="footageQuality === 'max'" style="opacity:.7">
+                  Máx. resolução baixa 1440p/2160p em VP9/AV1 e transcodifica para H.264 — arquivo
+                  bem maior e alguns minutos de encode, mas mais resolução para zoom e crop.
+                </small></p>
               </div>
             </template>
 
@@ -679,6 +688,7 @@ function wizard(runId, initialSteps, saved) {
     newHook: true,
     footageUrls: saved.footageUrls || [],
     newFootageUrl: '',
+    footageQuality: 'edit',
     footageItems: [],
     referenceUrls: saved.referenceUrls || [],
     projectLanguage: saved.language || 'en',
@@ -982,7 +992,7 @@ function wizard(runId, initialSteps, saved) {
       const url = this.newFootageUrl.trim();
       if (!url) return;
       this.newFootageUrl = '';
-      await this.runStep('footage', { url });
+      await this.runStep('footage', { url, quality: this.footageQuality });
     },
 
     async removeFootage(index) {

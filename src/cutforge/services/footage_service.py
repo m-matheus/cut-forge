@@ -5,11 +5,19 @@ from cutforge.integrations import youtube_dl
 from cutforge.models.project import VideoProject
 
 
-def download_footage(project: VideoProject, url: str, index: int = 0, *, on_log=None) -> dict:
-    """Download YouTube footage to footage/source_NN.mp4 and record the URL."""
+def download_footage(project: VideoProject, url: str, index: int = 0, *,
+                     quality: str | None = None, max_height: int | None = None,
+                     on_log=None) -> dict:
+    """Download YouTube footage to footage/source_NN.mp4 and record the URL.
+
+    ``quality`` is ``"edit"`` (best native H.264, no re-encode) or ``"max"`` (highest
+    resolution at any codec, transcoded to H.264 for Premiere). Both default from
+    settings, so callers that do not care can omit them.
+    """
     dest = project.footage_path_at(index)
     dest.parent.mkdir(parents=True, exist_ok=True)
-    meta = youtube_dl.download(url, dest, on_log=on_log)
+    meta = youtube_dl.download(url, dest, quality=quality, max_height=max_height,
+                               on_log=on_log)
 
     # Keep footage_urls in sync.
     urls = list(project.footage_urls)

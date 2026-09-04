@@ -71,6 +71,16 @@ class Settings(BaseSettings):
     # members-only videos. Set YOUTUBE_COOKIES_FILE=/path/to/cookies.txt in .env.
     youtube_cookies_file: str | None = None
 
+    # Footage quality. "edit" (default) downloads the best H.264 rendition, which imports
+    # into Premiere with no re-encode but caps at 1080p on most uploads, because YouTube
+    # publishes 1440p/2160p only as VP9 and AV1. "max" takes the highest resolution at any
+    # codec and transcodes it to H.264 afterwards - better source resolution for zooms and
+    # crops, at the cost of encode time and one generation of re-encode.
+    youtube_quality: str = "edit"
+
+    # Optional resolution ceiling for footage downloads, e.g. 1080 or 1440. Unset = no cap.
+    youtube_max_height: int | None = None
+
     @property
     def project_root(self) -> Path:
         return PROJECT_ROOT

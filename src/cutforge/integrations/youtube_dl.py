@@ -14,9 +14,20 @@ import json
 import re
 import subprocess
 import sys
+from collections import deque
+from functools import lru_cache
 from pathlib import Path
 
 YT_DLP = [sys.executable, "-m", "yt_dlp"]
+
+# --- Minimum yt-dlp -------------------------------------------------------------------
+# YouTube enforces a GVS PO Token on the player clients older yt-dlp builds default to
+# (android_vr, mweb, web). Without that token the metadata and the first ~10 MB download
+# normally and every byte after is answered with HTTP 403 - a download that looks healthy
+# until it dies at 10%. 2026.08.19 moved the default client set to visionos, which serves
+# the full stream untokenised, so older builds are refused up front rather than dying
+# halfway through a 90 MB clip.
+MIN_YTDLP_VERSION = (2026, 8, 19)
 
 # EJS solver: downloaded once from GitHub and cached locally. Required to solve
 # YouTube's n-challenge (without it, all https formats are blocked).
@@ -27,6 +38,58 @@ _SUB_CLIENT_ARGS = ["--extractor-args", "youtube:player_client=web_embedded"]
 
 # Disable bgutil pip plugin if installed (avoids Deno startup overhead on every call).
 _NO_BGUTIL = ["--extractor-args", "youtubepot-bgutilscript:server_home=/nonexistent"]
+
+# Long clips routinely hit a transient CDN hiccup; retry instead of failing the pipeline
+# step. exp=1:20 backs off 1s, 2s, 4s ... capped at 20s.
+_RETRIES = [
+    "--retries", "10",
+    "--fragment-retries", "10",
+    "--extractor-retries", "3",
+    "--file-access-retries", "5",
+    "--retry-sleep", "http:exp=1:20",
+]
+
+# --- Quality modes --------------------------------------------------------------------
+QUALITY_EDIT = "edit"  # best H.264 rendition - imports into Premiere with no re-encode
+QUALITY_MAX = "max"    # best resolution at any codec, transcoded to H.264 when needed
+
+# Prefer AAC so the merged file stays a clean Premiere-native mp4.
+# Parenthesised: without the group the "/" alternatives would detach from the "+"
+# and yt-dlp could fall back to an audio-only download.
+_AUDIO_SELECTOR = "(bestaudio[acodec^=mp4a]/bestaudio[ext=m4a]/bestaudio)"
+
+# YouTube publishes each rendition twice: as DASH (protocol https) and as HLS
+# (m3u8_native). The HLS manifest advertises a peak BANDWIDTH near double the real
+# average - 1080p60 avc1 lists at 4907k against DASH's 2515k - yet downloading both
+# yields the same ~94 MiB, 2512 kbps encode. Restricting to https keeps the bitrate sort
+# honest and gives exact sizes plus resumable byte ranges.
+_HTTPS_ONLY = "[protocol^=http]"
+
+
+@lru_cache(maxsize=1)
+def _ytdlp_version() -> tuple[int, ...]:
+    """Return the installed yt-dlp version as a numeric tuple, e.g. ``(2026, 8, 19)``."""
+    from yt_dlp.version import __version__ as raw
+    parts: list[int] = []
+    for chunk in raw.split(".")[:3]:
+        digits = "".join(c for c in chunk if c.isdigit())
+        parts.append(int(digits) if digits else 0)
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts)
+
+
+def _require_ytdlp_version() -> None:
+    """Refuse to run against a yt-dlp too old for YouTube's current PO Token enforcement."""
+    if _ytdlp_version() >= MIN_YTDLP_VERSION:
+        return
+    have = ".".join(str(p) for p in _ytdlp_version())
+    want = ".".join(str(p) for p in MIN_YTDLP_VERSION)
+    raise RuntimeError(
+        f"yt-dlp {have} is too old for YouTube (needs >= {want}). Older builds pick a "
+        f"player client YouTube now blocks with HTTP 403 after about 10 MB, so downloads "
+        f"die around 10%. Fix: pip install -U yt-dlp"
+    )
 
 
 def _cookies_args() -> list[str]:
@@ -46,7 +109,8 @@ def _cookies_args() -> list[str]:
 
 def _dl_args() -> list[str]:
     """Base args for all video/audio download commands."""
-    return _EJS + _NO_BGUTIL + _cookies_args()
+    _require_ytdlp_version()
+    return _EJS + _NO_BGUTIL + _RETRIES + _cookies_args()
 
 
 def _run_ytdlp(cmd: list[str]) -> subprocess.CompletedProcess:
@@ -58,6 +122,58 @@ def _run_ytdlp(cmd: list[str]) -> subprocess.CompletedProcess:
         raise RuntimeError(
             f"yt-dlp failed (exit {exc.returncode}): {stderr or '(no stderr)'}"
         ) from None
+
+
+# Failure signatures worth translating: yt-dlp reports the symptom, these name the cause
+# and the fix so a pipeline log is actionable without re-running the command by hand.
+_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
+    (("http error 403", "forbidden"),
+     "YouTube cut the video stream off mid-download - the PO Token block. Run "
+     "'pip install -U yt-dlp' and retry."),
+    (("sign in to confirm", "not a bot", "cookies are no longer valid", "login required"),
+     "YouTube wants an authenticated session. Re-export YOUTUBE_COOKIES_FILE from a "
+     "logged-in browser; those cookies expire every few weeks."),
+    (("video unavailable", "private video", "members-only", "age-restricted"),
+     "The video is not available to this account: private, removed, members-only or "
+     "age-gated."),
+    (("requested format is not available",),
+     "No rendition matched the quality filter. Raise or clear YOUTUBE_MAX_HEIGHT, or set "
+     "YOUTUBE_QUALITY=max to allow VP9/AV1 renditions."),
+)
+
+
+def _failure_message(action: str, url: str, code: int, tail: list[str]) -> str:
+    """Build an error message carrying yt-dlp's own last error line plus a likely cause."""
+    errors = [ln for ln in tail if "ERROR" in ln]
+    detail = errors[-1] if errors else (tail[-1] if tail else "(no output captured)")
+    blob = " ".join(tail).lower()
+    hint = next((h for needles, h in _HINTS if any(n in blob for n in needles)), "")
+    message = f"yt-dlp {action} failed (exit {code}) for {url}\n  {detail}"
+    return f"{message}\n  Hint: {hint}" if hint else message
+
+
+def _stream_ytdlp(cmd: list[str], *, action: str, url: str, on_log=None) -> None:
+    """Run yt-dlp, streaming output to ``on_log``, raising with the real error on failure.
+
+    yt-dlp writes errors to stderr, merged into stdout here for live progress; keeping a
+    tail of that stream is what lets the raised exception name the actual failure instead
+    of only an exit code.
+    """
+    process = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding="utf-8", errors="replace",
+    )
+    tail: deque[str] = deque(maxlen=40)
+    for line in process.stdout:
+        line = line.rstrip()
+        if not line:
+            continue
+        tail.append(line)
+        if on_log:
+            on_log(line)
+    process.wait()
+    if process.returncode != 0:
+        raise RuntimeError(_failure_message(action, url, process.returncode, list(tail)))
 
 
 def probe(url: str) -> dict:
@@ -111,42 +227,221 @@ def list_manual_subtitles(url: str) -> list[dict]:
     return out
 
 
-def download(url: str, dest: Path, *, on_log=None) -> dict:
-    """Download the best <=1080p mp4 to ``dest`` and return metadata.
+def _quality_defaults(quality: str | None, max_height: int | None) -> tuple[str, int | None]:
+    """Resolve the quality mode and height cap, falling back to settings then defaults."""
+    if quality is None or max_height is None:
+        try:
+            from cutforge.config.settings import get_settings
+            settings = get_settings()
+            if quality is None:
+                quality = getattr(settings, "youtube_quality", None)
+            if max_height is None:
+                max_height = getattr(settings, "youtube_max_height", None)
+        except Exception:
+            pass
+    resolved = (quality or QUALITY_EDIT).strip().lower()
+    if resolved not in (QUALITY_EDIT, QUALITY_MAX):
+        raise ValueError(
+            f"Unknown quality '{quality}'. Use '{QUALITY_EDIT}' (native H.264) or "
+            f"'{QUALITY_MAX}' (highest resolution, transcoded)."
+        )
+    return resolved, max_height
 
-    ``on_log`` (optional callable) receives yt-dlp stdout lines for live progress.
+
+def _format_args(quality: str, max_height: int | None) -> list[str]:
+    """Build the yt-dlp ``-f``/``-S`` pair for a quality mode.
+
+    ``QUALITY_EDIT`` keeps the download Premiere-native: the best H.264 (avc1) rendition
+    with AAC audio, no re-encode. On most YouTube uploads that caps out at 1080p, because
+    YouTube only publishes 1440p and 2160p as VP9 and AV1.
+
+    ``QUALITY_MAX`` takes the highest resolution on offer regardless of codec, which the
+    caller then transcodes to H.264. Sorting puts resolution and fps first, then prefers
+    h264 so an equal-resolution rendition that needs no transcode wins, and only then
+    falls back to bitrate.
     """
+    cap = f"[height<={max_height}]" if max_height else ""
+    if quality == QUALITY_MAX:
+        chain = (
+            f"bestvideo{cap}{_HTTPS_ONLY}+{_AUDIO_SELECTOR}/"
+            f"bestvideo{cap}+{_AUDIO_SELECTOR}/"
+            f"best{cap}/best"
+        )
+        sort = "res,fps,vcodec:h264,tbr"
+    else:
+        chain = (
+            f"bestvideo[vcodec^=avc1]{cap}{_HTTPS_ONLY}+{_AUDIO_SELECTOR}/"
+            f"bestvideo[vcodec^=avc1]{cap}+{_AUDIO_SELECTOR}/"
+            f"best[vcodec^=avc1]{cap}/best[ext=mp4]{cap}/best{cap}/best"
+        )
+        sort = "res,fps,tbr"
+    return ["-f", chain, "-S", sort]
+
+
+def _video_codec(path: Path) -> str:
+    """Return the video codec of ``path`` ("h264", "vp9", "av1", ...), "" if unknown."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-select_streams", "v:0",
+             "-show_entries", "stream=codec_name", "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, encoding="utf-8", check=True,
+        )
+    except Exception:
+        return ""
+    lines = [ln.strip() for ln in result.stdout.splitlines() if ln.strip()]
+    return lines[0] if lines else ""
+
+
+@lru_cache(maxsize=1)
+def _has_nvenc() -> bool:
+    """True when ffmpeg exposes NVIDIA's H.264 encoder, which is far faster than libx264."""
+    try:
+        result = subprocess.run(
+            ["ffmpeg", "-hide_banner", "-encoders"],
+            capture_output=True, text=True, encoding="utf-8", check=True,
+        )
+    except Exception:
+        return False
+    return "h264_nvenc" in result.stdout
+
+
+# Keys of ffmpeg's -progress stream, e.g. "out_time_us=12345" or "progress=continue".
+_FFMPEG_PROGRESS_KEY = re.compile(r"^[a-z_0-9]+=")
+
+
+def _media_duration(path: Path) -> float:
+    """Return the duration of ``path`` in seconds, or 0.0 when ffprobe cannot tell."""
+    try:
+        result = subprocess.run(
+            ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+             "-of", "csv=p=0", str(path)],
+            capture_output=True, text=True, encoding="utf-8", check=True,
+        )
+        return float(result.stdout.strip().splitlines()[0])
+    except Exception:
+        return 0.0
+
+
+def _run_ffmpeg(cmd: list[str], *, duration: float, on_log=None) -> tuple[int, str]:
+    """Run an ffmpeg command with ``-progress pipe:1``, logging percent as it encodes.
+
+    A silent multi-minute step reads as a hung pipeline, so progress is reported every 5%.
+    ffmpeg's own ``-stats`` output is carriage-return separated and does not survive line
+    iteration; the ``-progress`` stream is newline-delimited ``key=value`` blocks, which
+    does. Returns ``(exit code, last error line)``.
+    """
+    log = on_log or (lambda _m: None)
+    process = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, encoding="utf-8", errors="replace",
+    )
+    tail: deque[str] = deque(maxlen=20)
+    next_mark = 5
+    for line in process.stdout:
+        line = line.strip()
+        if not line:
+            continue
+        if line.startswith("out_time_us=") and duration > 0:
+            raw = line.split("=", 1)[1]
+            if raw.isdigit():
+                percent = min(100.0, (int(raw) / 1_000_000) / duration * 100)
+                if percent >= next_mark:
+                    log(f"[transcode] {percent:.0f}%")
+                    next_mark = int(percent // 5) * 5 + 5
+        elif not _FFMPEG_PROGRESS_KEY.match(line):
+            # Not part of the progress stream: an actual ffmpeg diagnostic. Matching the
+            # key shape rather than testing for "=" keeps error lines that contain one.
+            tail.append(line)
+    process.wait()
+    return process.returncode, (tail[-1] if tail else f"exit {process.returncode}")
+
+
+def _transcode_to_h264(path: Path, *, on_log=None) -> None:
+    """Re-encode ``path`` in place to high-bitrate H.264/AAC so Premiere can decode it.
+
+    Only reached on ``QUALITY_MAX`` downloads that came back VP9 or AV1 - the codecs
+    YouTube uses above 1080p and the ones Premiere imports as "Media offline". Settings
+    are near visually lossless (NVENC cq 18, x264 crf 16) so the extra resolution stays
+    worth having despite the generational re-encode. NVENC is tried first and libx264 is
+    the fallback, since a driver mismatch makes NVENC fail at encoder-open time.
+    """
+    log = on_log or (lambda _m: None)
+    codec = _video_codec(path)
+    if codec in ("h264", ""):
+        return
+
+    tmp = path.with_name(f"{path.stem}.h264{path.suffix}")
+    attempts: list[list[str]] = []
+    if _has_nvenc():
+        attempts.append([
+            "-c:v", "h264_nvenc", "-preset", "p7", "-tune", "hq",
+            "-rc", "vbr", "-cq", "18", "-b:v", "0",
+            "-profile:v", "high", "-pix_fmt", "yuv420p",
+        ])
+    attempts.append([
+        "-c:v", "libx264", "-crf", "16", "-preset", "slow", "-pix_fmt", "yuv420p",
+    ])
+
+    duration = _media_duration(path)
+    last_error = ""
+    for video_args in attempts:
+        encoder = video_args[1]
+        log(f"Transcoding {codec} -> H.264 ({encoder}); a 1440p60 clip takes a few minutes.")
+        cmd = (
+            ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-nostats",
+             "-progress", "pipe:1", "-i", str(path)]
+            + video_args
+            + ["-c:a", "aac", "-b:a", "320k", "-movflags", "+faststart", str(tmp)]
+        )
+        code, last_error = _run_ffmpeg(cmd, duration=duration, on_log=log)
+        if code == 0 and tmp.exists() and tmp.stat().st_size > 0:
+            tmp.replace(path)
+            log(f"Transcode complete: {path.name} is now H.264.")
+            return
+        log(f"{encoder} failed: {last_error}")
+        tmp.unlink(missing_ok=True)
+
+    raise RuntimeError(
+        f"ffmpeg could not transcode {path.name} from {codec} to H.264: {last_error}. "
+        f"The {codec} file is still on disk; set YOUTUBE_QUALITY=edit to download a "
+        f"native H.264 rendition instead."
+    )
+
+
+def download(url: str, dest: Path, *, quality: str | None = None,
+             max_height: int | None = None, on_log=None) -> dict:
+    """Download ``url`` to ``dest`` as a Premiere-ready H.264 mp4 and return metadata.
+
+    ``quality`` is ``"edit"`` (default: best H.264 rendition, no re-encode) or ``"max"``
+    (best resolution at any codec, transcoded to H.264 when YouTube publishes the top
+    renditions only as VP9/AV1). ``max_height`` caps resolution. Both fall back to
+    ``YOUTUBE_QUALITY`` / ``YOUTUBE_MAX_HEIGHT`` in settings when omitted. ``on_log``
+    receives yt-dlp output lines for live progress.
+    """
+    log = on_log or (lambda _m: None)
+    quality, max_height = _quality_defaults(quality, max_height)
     dest.parent.mkdir(parents=True, exist_ok=True)
     meta = probe(url)
-    if on_log:
-        on_log(f"Downloading: {meta['title']} ({meta['duration']}s)")
+    cap = f", <= {max_height}p" if max_height else ""
+    log(f"Downloading: {meta['title']} ({meta['duration']}s) [quality={quality}{cap}]")
 
-    # Force H.264 (avc1) video: Premiere Pro cannot decode AV1 (av01), which YouTube now
-    # serves inside .mp4 containers — so an [ext=mp4] filter alone lets AV1 through and the
-    # clip imports as "Media offline". avc1 is universally supported. Fall back to any mp4
-    # (then anything) only if no H.264 rendition exists.
-    cmd = YT_DLP + _dl_args() + [
-        "-f", "bestvideo[vcodec^=avc1]+bestaudio[ext=m4a]/"
-              "best[vcodec^=avc1]/best[ext=mp4]/best",
+    cmd = YT_DLP + _dl_args() + _format_args(quality, max_height) + [
         "--merge-output-format", "mp4",
         "-o", str(dest),
         "--no-playlist",
         "--newline",
         url,
     ]
-    process = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, encoding="utf-8", errors="replace",
-    )
-    for line in process.stdout:
-        line = line.rstrip()
-        if line and on_log:
-            on_log(line)
-    process.wait()
-    if process.returncode != 0:
-        raise RuntimeError(f"yt-dlp failed (exit {process.returncode}) for {url}")
+    _stream_ytdlp(cmd, action="download", url=url, on_log=on_log)
+
+    if quality == QUALITY_MAX:
+        _transcode_to_h264(dest, on_log=on_log)
 
     meta["local_path"] = str(dest)
+    meta["quality"] = quality
+    codec = _video_codec(dest)
+    if codec:
+        meta["vcodec"] = codec
     return meta
 
 
@@ -235,19 +530,7 @@ def download_subtitles(url: str, out_dir: Path, *, lang: str = "en", on_log=None
         url,
     ]
     log(f"Fetching manual subtitles ({lang})…")
-    process = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, encoding="utf-8", errors="replace",
-    )
-    for line in process.stdout:
-        line = line.rstrip()
-        if line:
-            log(line)
-    process.wait()
-    if process.returncode != 0:
-        raise RuntimeError(
-            f"yt-dlp subtitle download failed (exit {process.returncode}) for {url}"
-        )
+    _stream_ytdlp(cmd, action="subtitle download", url=url, on_log=log)
     # A missing manual sub is not an error here — yt-dlp just writes nothing.
     vtt_files = sorted(out_dir.glob("*.vtt"))
     if not vtt_files:
@@ -281,17 +564,7 @@ def download_audio(url: str, dest: Path, *, audio_format: str = "mp3", on_log=No
         "--newline",
         url,
     ]
-    process = subprocess.Popen(
-        cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-        text=True, encoding="utf-8", errors="replace",
-    )
-    for line in process.stdout:
-        line = line.rstrip()
-        if line and on_log:
-            on_log(line)
-    process.wait()
-    if process.returncode != 0:
-        raise RuntimeError(f"yt-dlp audio download failed (exit {process.returncode}) for {url}")
+    _stream_ytdlp(cmd, action="audio download", url=url, on_log=on_log)
 
     meta["local_path"] = str(dest)
     return meta

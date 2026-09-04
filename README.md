@@ -55,6 +55,34 @@ pyinstaller build.spec
 # dist/CutForge.exe
 ```
 
+## Footage (download do YouTube)
+
+O download usa yt-dlp e exige `YOUTUBE_COOKIES_FILE` no `.env` (cookies Netscape exportados
+de um navegador logado no YouTube). Re-exporte os cookies a cada poucas semanas, quando o
+YouTube voltar a pedir "confirme que você não é um robô".
+
+**Mantenha o yt-dlp atualizado.** O YouTube exige um GVS PO Token nos player clients que as
+versões antigas usam por padrão: sem ele o download vai bem até ~10 MB e todo byte seguinte
+volta `HTTP Error 403` — ou seja, morre em ~10% de um clipe de 90 MB. O projeto exige
+`yt-dlp >= 2026.8.19`, que usa o client `visionos` e entrega o stream inteiro. Se voltar a
+falhar com 403, o primeiro passo é sempre:
+
+```bash
+.venv\Scripts\activate
+pip install -U yt-dlp
+```
+
+**Qualidade** (`YOUTUBE_QUALITY` no `.env`):
+
+- `edit` (padrão) — melhor rendição H.264 (avc1) + AAC. Importa no Premiere sem re-encode,
+  mas trava em 1080p na maioria dos vídeos, porque o YouTube só publica 1440p/2160p em VP9 e
+  AV1 — codecs que o Premiere abre como "Media offline".
+- `max` — pega a maior resolução disponível em qualquer codec e transcodifica para H.264
+  (NVENC quando há GPU NVIDIA, senão libx264 crf 16). Dá mais resolução de origem para zoom e
+  crop, ao custo de tempo de encode e uma geração de re-encode.
+
+`YOUTUBE_MAX_HEIGHT` limita a resolução (ex.: `1080`). Sem valor, sem limite.
+
 ## Fluxo no Premiere
 
 1. Abra `output/{run}/premiere/project.xml` no Premiere (File → Import).

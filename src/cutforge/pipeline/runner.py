@@ -83,8 +83,14 @@ def _execute(step_id: str, project: VideoProject, params: dict, log: LogFn):
         if not url:
             raise ValueError("Missing 'url' for footage download.")
         index = int(params.get("index", len(project.footage_urls)))
-        meta = footage_service.download_footage(project, url, index, on_log=log)
-        return {"title": meta.get("title"), "duration": meta.get("duration"), "index": index}
+        max_height = params.get("max_height")
+        meta = footage_service.download_footage(
+            project, url, index,
+            quality=params.get("quality"),
+            max_height=int(max_height) if max_height else None,
+            on_log=log)
+        return {"title": meta.get("title"), "duration": meta.get("duration"),
+                "index": index, "vcodec": meta.get("vcodec")}
 
     if step_id == "align":
         alignment = alignment_service.align_project(
