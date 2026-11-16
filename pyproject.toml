@@ -27,6 +27,7 @@ dependencies = [
     # Media / images
     "mutagen>=1.47.0",
     "Pillow>=10.0.0",
+    "segno>=1.6",           # Spotify QR code over the intro
     # Reference rhythm analysis (BPM/beat extraction from a reference rap)
     "librosa>=0.10.2",
     "soundfile>=0.12.0",

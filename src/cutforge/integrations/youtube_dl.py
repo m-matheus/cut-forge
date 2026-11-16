@@ -451,8 +451,10 @@ _VTT_TIMING = re.compile(r"^\d{2}:\d{2}:\d{2}[.,]\d{3}\s*-->")
 _VTT_CUE_INDEX = re.compile(r"^\d+$")
 # Any inline/markup tag: <c>, </c>, <c.colorXXXX>, <b>, </b>, karaoke <00:00:01.234>, etc.
 _VTT_ANY_TAG = re.compile(r"<[^>]*>")
-# Zero-width & non-breaking spacing that animated captions inject between glyphs.
-_VTT_ZERO_WIDTH = re.compile(r"[​‌‍﻿ ]")
+# Zero-width characters that animated captions inject between glyphs. Written as escapes
+# on purpose: a literal invisible char here once degraded into a plain space, which
+# stripped every word separator. Non-breaking spaces are normalised by ``_WS_RUN`` instead.
+_VTT_ZERO_WIDTH = re.compile("[​‌‍﻿]")
 _WS_RUN = re.compile(r"\s+")
 
 
@@ -480,6 +482,9 @@ def _vtt_to_text(vtt: str) -> str:
         raw_lines = raw_lines[i:]
 
     lines: list[str] = []
+    # text -> end time (s) of the cue in which it was last on screen.
+    last_end: dict[str, float] = {}
+    cue_start = cue_end = None
     for raw in raw_lines:
         line = raw.strip()
         if not line:
@@ -490,6 +495,7 @@ def _vtt_to_text(vtt: str) -> str:
                 or line == "##"):
             continue
         if "-->" in line and _VTT_TIMING.match(line):
+            cue_start, cue_end = _vtt_cue_times(line)
             continue
         if _VTT_CUE_INDEX.match(line):
             continue
@@ -500,9 +506,38 @@ def _vtt_to_text(vtt: str) -> str:
             continue
         # Collapse consecutive exact repeats (animated/karaoke-caption artifact).
         if lines and lines[-1] == line:
+            if cue_end is not None:
+                last_end[line] = cue_end
             continue
+        # Cross-fading captions keep the outgoing line on screen while the next one fades
+        # in, so the two interleave (A, B, A, B…). Drop a line that reappears while its
+        # previous occurrence is still (practically) visible; a chorus that genuinely
+        # recurs later starts well after the last one ended and is kept.
+        prev_end = last_end.get(line)
+        if (prev_end is not None and cue_start is not None
+                and cue_start - prev_end <= _VTT_OVERLAP_GAP_S):
+            last_end[line] = max(prev_end, cue_end or prev_end)
+            continue
+        if cue_end is not None:
+            last_end[line] = cue_end
         lines.append(line)
     return "\n".join(lines)
+
+
+# Max gap (s) between a line's last cue and its reappearance for the two to count as the
+# same on-screen occurrence (animated captions re-emit cues every ~1-3 video frames).
+_VTT_OVERLAP_GAP_S = 0.25
+
+
+def _vtt_timestamp(ts: str) -> float:
+    h, m, s = ts.replace(",", ".").split(":")
+    return int(h) * 3600 + int(m) * 60 + float(s)
+
+
+def _vtt_cue_times(timing_line: str) -> tuple[float, float]:
+    start, _, rest = timing_line.partition("-->")
+    end = rest.split()[0]
+    return _vtt_timestamp(start.strip()), _vtt_timestamp(end)
 
 
 def download_subtitles(url: str, out_dir: Path, *, lang: str = "en", on_log=None) -> str:

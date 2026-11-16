@@ -230,33 +230,16 @@
                     </div>
                   </template>
 
-                  <button class="secondary outline" @click="suggestGenres()"
-                          :aria-busy="busy.suggest" :disabled="busy.suggest">
-                    Sugerir gêneros
-                  </button>
-                  <template x-if="genres.length">
-                    <div class="genres">
-                      <template x-for="(g, i) in genres" :key="i">
-                        <label class="genre-opt" :class="chosenGenre===g.style ? 'genre-opt-selected' : ''"
-                               @click="chosenRefIndex = g.ref_index ?? 0">
-                          <input type="radio" name="genre" :value="g.style" x-model="chosenGenre">
-                          <div style="display:flex;align-items:center;gap:.4rem">
-                            <strong x-text="g.label"></strong>
-                            <template x-if="g.ref_index > 0">
-                              <span style="font-size:.65rem;opacity:.55" x-text="`ref #${g.ref_index + 1}`"></span>
-                            </template>
-                          </div>
-                          <small x-text="g.style"></small>
-                          <small class="muted" x-text="g.why"></small>
-                        </label>
-                      </template>
-                      <button class="secondary outline" style="margin-top:.5rem" @click="suggestGenres()"
-                              :aria-busy="busy.suggest" :disabled="busy.suggest">
-                        + Sugerir mais
-                      </button>
-                    </div>
+                  <label>Gênero <small class="muted">(opcional — vazio, a direção criativa escolhe o som: segue a referência, se houver, e evita repetir o estilo das últimas músicas)</small>
+                    <input placeholder="ex: drill, rap rock — ou cole um estilo Suno completo" x-model="chosenGenre"></label>
+                  <template x-if="referenceProfiles.length > 1">
+                    <label>Referência que define o som <small class="muted">(BPM e flow; o lore vem de todas)</small>
+                      <select x-model.number="chosenRefIndex">
+                        <template x-for="ref in referenceProfiles" :key="ref.index">
+                          <option :value="ref.index" x-text="`#${ref.index + 1} · ${ref.source_title || 'referência'} (${ref.bpm} BPM)`"></option>
+                        </template>
+                      </select></label>
                   </template>
-                  <input placeholder="…ou cole um estilo Suno" x-model="chosenGenre">
 
                   <!-- Narrative structure panel (follow-structure mode) -->
                   <template x-if="lyricsMode==='structure' && structureProfile">
@@ -424,10 +407,13 @@
                           <textarea rows="2" x-model="directionInstruction" style="width:100%;font-size:.8rem"
                                     placeholder="Instrução opcional p/ regenerar (ex: 'mude a direção da metáfora, evite o tema escolar, foque no poder dele')"></textarea>
                           <button class="secondary outline copy-btn" style="margin-top:.35rem"
-                                  @click="refreshCreativeDirection()" :aria-busy="busy.direction" :disabled="busy.direction || !chosenGenre">
+                                  @click="refreshCreativeDirection()" :aria-busy="busy.direction" :disabled="busy.direction">
                             Regenerar direção
                           </button>
                         </div>
+                        <template x-if="creativeDirection.sonic_direction">
+                          <p><strong>Som:</strong> <span x-text="creativeDirection.sonic_direction"></span></p>
+                        </template>
                         <template x-if="creativeDirection.core_theme">
                           <p><strong>Tema central:</strong> <span x-text="creativeDirection.core_theme"></span></p>
                         </template>
@@ -440,9 +426,12 @@
                         <template x-if="creativeDirection.hook_concept">
                           <p><strong>Conceito do hook:</strong> <span x-text="creativeDirection.hook_concept"></span></p>
                         </template>
+                        <template x-if="creativeDirection.intro_concept">
+                          <p><strong>Conceito da intro:</strong> <span x-text="creativeDirection.intro_concept"></span></p>
+                        </template>
                         <template x-if="creativeDirection.key_lore_points && creativeDirection.key_lore_points.length">
                           <div>
-                            <strong>Lore a usar:</strong>
+                            <strong>Cenas:</strong>
                             <ul style="margin:.25rem 0 .5rem 1rem">
                               <template x-for="pt in creativeDirection.key_lore_points" :key="pt">
                                 <li><span x-text="pt"></span></li>
@@ -450,8 +439,14 @@
                             </ul>
                           </div>
                         </template>
+                        <template x-if="creativeDirection.energy_map">
+                          <p><strong>Mapa de energia:</strong> <span x-text="creativeDirection.energy_map"></span></p>
+                        </template>
+                        <template x-if="creativeDirection.callback">
+                          <p><strong>Callback:</strong> <span x-text="creativeDirection.callback"></span></p>
+                        </template>
                         <template x-if="creativeDirection.original_metaphor_direction">
-                          <p><strong>Direção metafórica:</strong> <span x-text="creativeDirection.original_metaphor_direction"></span></p>
+                          <p><strong>Imagens recorrentes:</strong> <span x-text="creativeDirection.original_metaphor_direction"></span></p>
                         </template>
                         <template x-if="creativeDirection.things_to_avoid && creativeDirection.things_to_avoid.length">
                           <div>
@@ -467,8 +462,16 @@
                     </details>
                   </template>
 
+                  <label class="genre-opt" style="display:flex;align-items:flex-start;gap:.5rem;cursor:pointer;margin-bottom:.5rem">
+                    <input type="checkbox" x-model="reviewLyrics" style="margin-top:.2rem">
+                    <span>
+                      <strong>Revisar a letra</strong>
+                      <small class="muted" style="display:block">Segunda chamada ao modelo: confere as regras e o lore e devolve a letra corrigida.</small>
+                    </span>
+                  </label>
+
                   <button @click="generateLyrics(step)"
-                          :disabled="!chosenGenre || running"
+                          :disabled="running"
                           :aria-busy="running && current==='lyrics'">
                     <span x-text="step.status==='done' ? 'Regerar letra' : 'Gerar letra'"></span>
                   </button>
@@ -499,8 +502,14 @@
                           <small class="muted">Exclude: <span x-text="lyricsOutput.exclude"></span></small>
                         </template>
                       </div>
+                      <template x-for="w in lyricsOutput.warnings || []" :key="w">
+                        <p class="release-warn" x-text="'⚠ ' + w"></p>
+                      </template>
+                      <template x-if="Object.keys(lyricsOutput.pronunciations || {}).length">
+                        <small class="muted">Pronúncia no Suno: <span x-text="Object.entries(lyricsOutput.pronunciations).map(([t, r]) => `${t} → ${r}`).join('; ')"></span></small>
+                      </template>
                       <pre class="output-text" x-text="lyricsOutput.lyrics"></pre>
-                      <button class="secondary outline copy-btn" @click="copyText(lyricsOutput.lyrics)">Copiar letra</button>
+                      <button class="secondary outline copy-btn" @click="copyText(lyricsOutput.suno_lyrics)">Copiar letra</button>
                       <template x-if="lyricsOutput.style">
                         <button class="secondary outline copy-btn" @click="copyText(lyricsOutput.style)">Copiar estilo Suno</button>
                       </template>
@@ -572,18 +581,21 @@
             <!-- THUMBNAIL -->
             <template x-if="step.id === 'thumbnail'">
               <div>
-                <p><small>Envie prints de thumbnails que você gosta (opcional) — serão usados como molde de estilo (composição, enquadramento, luz).</small></p>
-                <input type="file" accept="image/*" multiple @change="uploadThumbnailRefs($event)">
-                <small x-show="thumbnailRefsCount > 0" class="ok"><span x-text="thumbnailRefsCount"></span> imagem(ns) de referência ✓</small>
-                <button @click="confirmRun('thumbnail', {}, 'Gerar thumbnail chama a API OpenAI Images.')"
+                <label>Thumbnail de referência <small class="muted">(mood board para uma imagem nova do personagem no próximo Gerar/Refazer; moldura, tempo, barra de progresso e textos dos prints são removidos antes; se a API de imagem recusar, o visual é descrito em texto)</small>
+                  <input type="file" multiple accept="image/*" @change="uploadThumbnailRefs($event)"></label>
+                <div class="file-list">
+                  <template x-for="f in thumbnailRefs" :key="f">
+                    <span class="chip">
+                      <a target="_blank" :href="`/api/runs/${runId}/thumbnail-refs/${encodeURIComponent(f)}`" x-text="f"></a>
+                      <a href="#" title="Remover" @click.prevent="removeThumbnailRef(f)">✕</a>
+                    </span>
+                  </template>
+                  <small class="muted" x-show="!thumbnailRefs.length">Sem referência: key art gerada a partir do baseline do canal + análise visual do personagem.</small>
+                </div>
+                <button @click="confirmRun('thumbnail', {}, 'Gerar thumbnail chama a API OpenAI Images (2 variações).')"
+                        x-show="step.status!=='done'"
                         :disabled="running"
                         :aria-busy="running && current==='thumbnail'">Gerar thumbnail</button>
-                <template x-if="step.status==='done'">
-                  <a class="thumb-link" :href="`/api/runs/${runId}/output/thumbnail?t=${Date.now()}`" target="_blank" title="Abrir em tamanho real">
-                    <img class="thumb" :src="`/api/runs/${runId}/output/thumbnail?t=${Date.now()}`"
-                         alt="Thumbnail gerada">
-                  </a>
-                </template>
               </div>
             </template>
 
@@ -592,24 +604,20 @@
               <div>
                 <button @click="confirmRun('metadata', {}, 'Gerar metadata chama a API Anthropic.')"
                         :disabled="running"
+                        x-show="step.status!=='done'"
                         :aria-busy="running && current==='metadata'">Gerar título/descrição/tags</button>
+              </div>
+            </template>
 
-                <template x-if="step.status==='done' && metadataOutput.title">
-                  <details class="output-preview" open>
-                    <summary>Metadata gerada</summary>
-                    <div class="output-block">
-                      <p><strong x-text="metadataOutput.title"></strong></p>
-                      <pre class="output-text small" x-text="metadataOutput.description"></pre>
-                      <p class="tags-row">
-                        <template x-for="(tag, i) in (metadataOutput.tags || [])" :key="i">
-                          <span class="tag" x-text="tag"></span>
-                        </template>
-                      </p>
-                      <button class="secondary outline copy-btn" @click="copyText(metadataOutput.title)">Copiar título</button>
-                      <button class="secondary outline copy-btn" @click="copyText(metadataOutput.description)">Copiar descrição</button>
-                    </div>
-                  </details>
-                </template>
+            <!-- RELEASE (distributor → Spotify as an artist) -->
+            <template x-if="step.id === 'release'">
+              <div>
+                <label>WAV do Suno <small class="muted">(na música: ⋯ → Download → WAV Audio; é o arquivo que vai para a distribuidora)</small>
+                  <input type="file" accept=".wav,audio/wav" @change="uploadReleaseAudio($event)"></label>
+                <button @click="confirmRun('release', {}, 'Preparar o lançamento gera a capa (API OpenAI Images) a partir de um conceito da API Anthropic.')"
+                        x-show="step.status!=='done'"
+                        :disabled="step.status==='locked' || running"
+                        :aria-busy="running && current==='release'">Preparar lançamento</button>
               </div>
             </template>
 
@@ -642,6 +650,91 @@
             <template x-if="step.status==='locked' && step.requires_hint">
               <small class="muted locked-hint" x-text="step.requires_hint"></small>
             </template>
+
+            <!-- METADATA: ready to paste into YouTube Studio, in its field order -->
+            <template x-if="step.id === 'metadata' && step.status === 'done' && metadataOutput.title">
+              <div class="pane-section">
+                <strong>Upload no YouTube <small class="muted">(copie cada campo como está)</small></strong>
+                <template x-for="f in ytFields()" :key="f.label">
+                  <div class="output-preview">
+                    <div class="yt-field-head">
+                      <strong x-text="f.label"></strong>
+                      <small class="muted" :class="f.text.length > f.max ? 'yt-over' : ''"
+                             x-text="`${f.text.length} / ${f.max}`"></small>
+                      <button class="secondary outline copy-btn" @click="copyField(f.text, f.label)">Copiar</button>
+                    </div>
+                    <pre class="output-text" :class="f.label === 'Descrição' ? 'yt-desc' : 'small'" x-text="f.text"></pre>
+                  </div>
+                </template>
+                <template x-if="stepDone('thumbnail')">
+                  <div class="output-preview">
+                    <div class="yt-field-head">
+                      <strong>Thumbnail</strong>
+                      <a class="secondary outline copy-btn" role="button" download="thumbnail.jpg"
+                         :href="`/api/runs/${runId}/output/thumbnail?t=${thumbStamp}`">Baixar</a>
+                    </div>
+                  </div>
+                </template>
+              </div>
+            </template>
+
+            <!-- RELEASE: the distributor's single form, in its field order -->
+            <template x-if="step.id === 'release' && step.status === 'done' && releaseOutput.fields">
+              <div class="pane-section">
+                <strong>Distribuidora <small class="muted">(formulário de single, na ordem dos campos)</small></strong>
+                <template x-for="w in releaseOutput.warnings || []" :key="w">
+                  <p class="release-warn" x-text="'⚠ ' + w"></p>
+                </template>
+                <div class="output-preview">
+                  <div class="yt-field-head">
+                    <strong>Capa</strong>
+                    <small class="muted">3000×3000 · sem o personagem (as lojas recusam)</small>
+                    <a class="secondary outline copy-btn" role="button" download="cover.jpg"
+                       :href="`/api/runs/${runId}/output/cover?t=${coverStamp}`">Baixar</a>
+                  </div>
+                  <img class="thumb release-cover" :src="`/api/runs/${runId}/output/cover?t=${coverStamp}`" alt="Capa">
+                </div>
+                <template x-for="f in releaseOutput.fields.filter(f => f.label !== 'Capa')" :key="f.label">
+                  <div class="output-preview">
+                    <div class="yt-field-head">
+                      <strong x-text="f.label"></strong>
+                      <button class="secondary outline copy-btn" @click="copyField(f.value, f.label)">Copiar</button>
+                    </div>
+                    <pre class="output-text" :class="f.multiline ? 'yt-desc' : 'small'" x-text="f.value"></pre>
+                    <small class="muted" x-show="f.hint" x-text="f.hint"></small>
+                  </div>
+                </template>
+                <div class="output-preview">
+                  <div class="yt-field-head"><strong>Link da faixa no Spotify</strong></div>
+                  <small class="muted">Quando a faixa sair, cole o link (Compartilhar → Copiar link da música) e refaça Metadata e Premiere: o QR do vídeo e a descrição passam a abrir a faixa. Até lá, apontam para o perfil de artista.</small>
+                  <input type="url" placeholder="https://open.spotify.com/track/..." x-model="spotifyTrackUrl">
+                  <button class="secondary outline" @click="saveSpotifyLink()">Salvar link</button>
+                </div>
+              </div>
+            </template>
+
+            <!-- Thumbnail preview + variants -->
+            <template x-if="step.id === 'thumbnail' && step.status === 'done'">
+              <div class="pane-section">
+                <strong>Thumbnail atual</strong>
+                <a class="thumb-link" target="_blank" :href="`/api/runs/${runId}/output/thumbnail?t=${thumbStamp}`">
+                  <img class="thumb" :src="`/api/runs/${runId}/output/thumbnail?t=${thumbStamp}`" alt="Thumbnail atual"></a>
+              </div>
+            </template>
+            <template x-if="step.id === 'thumbnail' && thumbnailVariants.length">
+              <div class="pane-section">
+                <strong>Variações <small class="muted">(clique em uma para usá-la como thumbnail, sem gerar imagens novas)</small></strong>
+                <div class="variant-grid">
+                  <template x-for="v in thumbnailVariants" :key="v">
+                    <button type="button" class="variant" :class="thumbnailSelected === v ? 'is-chosen' : ''"
+                            :disabled="running" @click="pickThumbnailVariant(v)">
+                      <img :src="`/api/runs/${runId}/thumbnail-variants/${v}?t=${thumbStamp}`" :alt="v" loading="lazy">
+                      <span x-text="(v.startsWith('refthumb_') ? 'ref #' : 'art #') + v.match(/\d+/)[0]"></span>
+                    </button>
+                  </template>
+                </div>
+              </div>
+            </template>
           </div>
         </div>
       </template>
@@ -672,8 +765,7 @@ function wizard(runId, initialSteps, saved) {
     current: null,
     openStep: null,
     consoleOpen: true,
-    busy: { suggest: false, lore: false, direction: false, structure: false, story: false, refLyrics: null, refSubs: null, newSubs: false },
-    genres: [],
+    busy: { lore: false, direction: false, structure: false, story: false, refLyrics: null, refSubs: null, newSubs: false },
     chosenGenre: '',
     chosenRefIndex: 0,
     loreProfile: null,
@@ -686,6 +778,7 @@ function wizard(runId, initialSteps, saved) {
     storyInstruction: '',
     lyricsMode: 'original',
     newHook: true,
+    reviewLyrics: false,
     footageUrls: saved.footageUrls || [],
     newFootageUrl: '',
     footageQuality: 'edit',
@@ -698,13 +791,19 @@ function wizard(runId, initialSteps, saved) {
     newReferenceSource: 'manual',
     newSubLangs: null,
     referenceProfiles: [],
-    thumbnailRefsCount: 0,
+    thumbnailRefs: [],
+    thumbnailVariants: [],
+    thumbnailSelected: null,
+    thumbStamp: Date.now(),
     trackUploaded: false,
     trackUploading: false,
     trackUploadPct: 0,
     lyricsTab: 'generate',
     lyricsOutput: {},
     metadataOutput: {},
+    releaseOutput: {},
+    coverStamp: Date.now(),
+    spotifyTrackUrl: '',
     hasReference: false,
     _es: null,
 
@@ -792,7 +891,8 @@ function wizard(runId, initialSteps, saved) {
       await this.loadFootages();
       // Thumbnail style-reference images (persist per run).
       const trefs = await fetch(`/api/runs/${this.runId}/thumbnail-refs`);
-      if (trefs.ok) this.thumbnailRefsCount = (await trefs.json()).count || 0;
+      if (trefs.ok) this.thumbnailRefs = (await trefs.json()).refs || [];
+      await this.loadThumbnailVariants();
       if (done('lyrics')) {
         const r = await fetch(`/api/runs/${this.runId}/output/lyrics`);
         if (r.ok) this.lyricsOutput = await r.json();
@@ -800,6 +900,14 @@ function wizard(runId, initialSteps, saved) {
       if (done('metadata')) {
         const r = await fetch(`/api/runs/${this.runId}/output/metadata`);
         if (r.ok) this.metadataOutput = await r.json();
+      }
+      if (done('release')) {
+        const r = await fetch(`/api/runs/${this.runId}/output/release`);
+        if (r.ok) {
+          this.releaseOutput = await r.json();
+          this.spotifyTrackUrl = this.releaseOutput.spotify_track_url || '';
+          this.coverStamp = Date.now();
+        }
       }
       // Load lore + creative direction if available (they may exist even before lyrics)
       const lr = await fetch(`/api/runs/${this.runId}/lore-profile`);
@@ -810,22 +918,6 @@ function wizard(runId, initialSteps, saved) {
       if (sr.ok) { this.structureProfile = await sr.json(); this.lyricsMode = 'structure'; }
       const str = await fetch(`/api/runs/${this.runId}/story-profile`);
       if (str.ok) { this.storyProfile = await str.json(); this.lyricsMode = 'rewrite'; }
-    },
-
-    async suggestGenres() {
-      this.busy.suggest = true;
-      try {
-        const r = await fetch(`/api/runs/${this.runId}/suggest-genres`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({}),
-        });
-        const j = await r.json();
-        // Accumulate: append new directions, dedup by style string
-        const existing = new Set(this.genres.map(g => g.style));
-        const fresh = (j.directions || []).filter(g => !existing.has(g.style));
-        this.genres = [...this.genres, ...fresh];
-      } finally { this.busy.suggest = false; }
     },
 
     async refreshLore() {
@@ -841,7 +933,6 @@ function wizard(runId, initialSteps, saved) {
     },
 
     async refreshCreativeDirection() {
-      if (!this.chosenGenre) { alert('Escolha um gênero primeiro.'); return; }
       this.busy.direction = true;
       try {
         const r = await fetch(`/api/runs/${this.runId}/creative-direction/refresh`, {
@@ -1009,7 +1100,10 @@ function wizard(runId, initialSteps, saved) {
 
     redoStep(step) {
       let params = {};
-      if (!confirm('Isso vai refazer o passo e substituir a saída atual.\n\nContinuar?')) return;
+      const msg = step.id === 'thumbnail'
+        ? 'Gera 2 novas variações (API OpenAI Images); as atuais continuam disponíveis.'
+        : 'Isso vai refazer o passo e substituir a saída atual.';
+      if (!confirm(msg + '\n\nContinuar?')) return;
       this.runStep(step.id, params, true);
     },
 
@@ -1020,7 +1114,7 @@ function wizard(runId, initialSteps, saved) {
         : 'Gerar letra chama a API Anthropic.';
       if (!confirm(msg + '\n\nContinuar?')) return;
       this.lyricsOutput = {};
-      this.runStep('lyrics', { genre: this.chosenGenre, ref_index: this.chosenRefIndex, mode: this.lyricsMode, new_hook: this.newHook }, regenerating);
+      this.runStep('lyrics', { genre: this.chosenGenre, ref_index: this.chosenRefIndex, mode: this.lyricsMode, new_hook: this.newHook, review: this.reviewLyrics }, regenerating);
     },
 
     async runStep(stepId, params, force) {
@@ -1078,15 +1172,58 @@ function wizard(runId, initialSteps, saved) {
       }
     },
 
+    async uploadReleaseAudio(ev) {
+      const file = ev.target.files[0];
+      if (!file) return;
+      const fd = new FormData(); fd.append('file', file);
+      this.pushLog(`▶ Enviando track.wav (${file.name}, ${(file.size / 1048576).toFixed(1)} MB)…`);
+      const res = await fetch(`/api/runs/${this.runId}/release-audio`, { method: 'POST', body: fd });
+      ev.target.value = '';
+      if (!res.ok) { this.toast((await res.json()).error || 'Falha no upload'); return; }
+      this.toast('track.wav enviado ✓');
+      await this.loadOutputs();
+    },
+
+    async saveSpotifyLink() {
+      const res = await fetch(`/api/runs/${this.runId}/spotify-link`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: this.spotifyTrackUrl }),
+      });
+      const j = await res.json();
+      this.toast(res.ok ? 'Link salvo — refaça Metadata e Premiere' : j.error);
+    },
+
     async uploadThumbnailRefs(ev) {
       const files = ev.target.files;
       if (!files || !files.length) return;
       const fd = new FormData();
       for (const f of files) fd.append('files', f);
       const res = await fetch(`/api/runs/${this.runId}/thumbnail-refs`, { method: 'POST', body: fd });
-      const data = await res.json();
-      this.thumbnailRefsCount = data.count || 0;
-      this.toast(`${this.thumbnailRefsCount} imagem(ns) de referência enviada(s)`);
+      ev.target.value = '';
+      if (!res.ok) { this.toast('Falha no upload'); return; }
+      this.thumbnailRefs = (await res.json()).refs || [];
+      this.toast(`${files.length} imagem(ns) de referência enviada(s) ✓`);
+    },
+
+    async removeThumbnailRef(name) {
+      await fetch(`/api/runs/${this.runId}/thumbnail-refs/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      this.thumbnailRefs = this.thumbnailRefs.filter(f => f !== name);
+      this.toast(`${name} removida`);
+    },
+
+    pickThumbnailVariant(name) {
+      if (name === this.thumbnailSelected) return;
+      this.thumbnailSelected = name;
+      this.runStep('thumbnail', { pick: name }, true);
+    },
+
+    async loadThumbnailVariants() {
+      const r = await fetch(`/api/runs/${this.runId}/thumbnail-variants`);
+      if (!r.ok) return;
+      const data = await r.json();
+      this.thumbnailVariants = data.variants || [];
+      this.thumbnailSelected = data.selected || null;
+      this.thumbStamp = Date.now();
     },
 
     async openFolder() {
@@ -1095,6 +1232,23 @@ function wizard(runId, initialSteps, saved) {
 
     copyText(text) {
       navigator.clipboard.writeText(text).then(() => this.toast('Copiado!'));
+    },
+
+    ytFields() {
+      const m = this.metadataOutput;
+      return [
+        { label: 'Título', text: m.title || '', max: 100 },
+        { label: 'Descrição', text: m.description || '', max: 5000 },
+        { label: 'Tags', text: (m.tags || []).join(', '), max: 500 },
+      ];
+    },
+
+    copyField(text, label) {
+      navigator.clipboard.writeText(text).then(() => this.toast(`${label} copiado`));
+    },
+
+    stepDone(id) {
+      return this.steps.some(s => s.id === id && s.status === 'done');
     },
 
     copyLog() {

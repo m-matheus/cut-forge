@@ -20,13 +20,44 @@ _GLUE_WORDS = frozenset({
 })
 
 
+# Lyric-sheet annotations ([Spoken], [Chorus], [Verse 1], …) are performance
+# notes for the singer, not lyrics — they must never reach the screen.
+_TAG_RE = re.compile(r"^[\[(][^\]\)]*[\]\)][.,!?…]*$")
+# Em/en dashes read as noise in a caption (they arrive as their own token from
+# the aligner, e.g. "BANKAI! — THAT'S THE WARNING"). Plain hyphens are kept,
+# so "GHOST-WHITE" survives intact.
+_DASH_RE = re.compile(r"[—–]+")
+# Punctuation a caption block should never end on. "!" and "?" are kept —
+# they carry delivery, a period or comma only carries grammar.
+_TRAILING_PUNCT = " .,;:…"
+
+
 def _is_glue(word: str) -> bool:
     return re.sub(r"[^\w]", "", word).lower() in _GLUE_WORDS
 
 
-def _strip_trailing_comma(text: str) -> str:
-    """A caption block should never end on a comma — drop trailing comma(s)/space."""
-    return text.rstrip(", ")
+def _is_caption_word(word: str) -> bool:
+    """False for tokens that are markup rather than something the singer sings."""
+    token = _DASH_RE.sub("", word).strip()
+    return bool(token) and not _TAG_RE.match(token)
+
+
+def _is_comma_orphan(chunk: list) -> bool:
+    """True when a chunk ends with a comma followed by a single stray word.
+
+    "RENJI BLOCKS MY PATH, KENPACHI" reads better as "RENJI BLOCKS MY PATH"
+    with "KENPACHI" leading the next block. The word moves forward and the
+    now-trailing comma is dropped by _clean_text. Chunks of fewer than three
+    words are left alone so the move never strands a single word on screen.
+    """
+    return len(chunk) >= 3 and chunk[-2].word.rstrip().endswith(",")
+
+
+def _clean_text(text: str) -> str:
+    """Strip dashes and final punctuation, and collapse the resulting gaps."""
+    text = _DASH_RE.sub(" ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text.rstrip(_TRAILING_PUNCT)
 
 
 def seconds_to_srt_time(seconds: float) -> str:
@@ -51,18 +82,26 @@ def build_srt(lines: list[LyricLine], *, max_chunk_duration: float = 1.5,
     max_chunk_duration seconds OR reaches max_words words (whichever comes first).
 
     Post-processing passes improve quality:
+    - Markup drop: lyric-sheet tags ([Spoken], [Chorus], …) and bare em/en
+      dashes are removed before chunking, so they never take up screen time.
     - Glue-word repair: if the last word of a chunk is a short function word
       (I, a, the, to, and, …) it is moved to the start of the next chunk within
       the same line, so phrase openings stay with their phrase.
-    - Trailing-comma strip: a block never ends on a comma (it is dropped).
+    - Comma-orphan repair: a chunk ending in ", <one word>" hands that word to
+      the next chunk — "RENJI BLOCKS MY PATH, KENPACHI" / "GRINS FOR THE KILL"
+      becomes "RENJI BLOCKS MY PATH" / "KENPACHI GRINS FOR THE KILL".
+    - Text clean-up: dashes and final punctuation (. , ; : …) are stripped;
+      "!" and "?" stay because they carry delivery.
     - Tight end times: each caption clears shortly after its last sung word
       (TAIL_HOLD) instead of lingering, but consecutive lines chain seamlessly
       when the next one starts almost immediately (CHAIN_GAP).
+    - No overlaps: a caption never starts before the previous one had MIN_VISIBLE
+      on screen, and never ends after the next one starts.
     """
     # --- Phase 1: build per-line word-level chunks ---
     line_chunk_lists: list[list[list]] = []
     for line in lines:
-        words = line.words
+        words = [w for w in line.words if _is_caption_word(w.word)]
         if not words:
             line_chunk_lists.append([])
             continue
@@ -77,11 +116,13 @@ def build_srt(lines: list[LyricLine], *, max_chunk_duration: float = 1.5,
         if chunk:
             chunks.append(chunk)
 
-        # --- Phase 2: glue-word repair within this line ---
+        # --- Phase 2: hand stray trailing words to the next chunk of this line ---
+        # Repeat per chunk: moving a glue word can expose a comma orphan behind
+        # it (". . . ribs, sparked the" -> "the" then "sparked" both move on).
         for i in range(len(chunks) - 1):
-            if chunks[i] and _is_glue(chunks[i][-1].word):
-                moved = chunks[i].pop()
-                chunks[i + 1].insert(0, moved)
+            while chunks[i] and (_is_glue(chunks[i][-1].word)
+                                 or _is_comma_orphan(chunks[i])):
+                chunks[i + 1].insert(0, chunks[i].pop())
 
         line_chunk_lists.append([c for c in chunks if c])
 
@@ -89,8 +130,7 @@ def build_srt(lines: list[LyricLine], *, max_chunk_duration: float = 1.5,
     groups: list[dict] = []
     for chunks in line_chunk_lists:
         for chunk in chunks:
-            text = " ".join(w.word for w in chunk).upper().strip()
-            text = _strip_trailing_comma(text)
+            text = _clean_text(" ".join(w.word for w in chunk).upper())
             if text:
                 groups.append({
                     "start": chunk[0].start,
@@ -106,9 +146,19 @@ def build_srt(lines: list[LyricLine], *, max_chunk_duration: float = 1.5,
     #   CHAIN_GAP — if the next caption starts within this, hold until it so
     #               back-to-back lines chain seamlessly (no blank flicker).
     #   MIN_DUR   — floor so very short chunks stay readable (never overlapping next).
+    #   MIN_VISIBLE — every caption gets this long before the next one replaces it.
     TAIL_HOLD = 0.2
     CHAIN_GAP = 0.7
     MIN_DUR = 0.8
+    MIN_VISIBLE = 0.3
+
+    # Words the aligner squeezed onto one instant give several groups the same start.
+    # Overlapping blocks import into Premiere stacked on top of each other, so each
+    # group waits its turn; the delay disappears at the next real gap.
+    earliest = 0.0
+    for grp in groups:
+        grp["start"] = max(grp["start"], earliest)
+        earliest = grp["start"] + MIN_VISIBLE
 
     out = []
     for i, grp in enumerate(groups):
@@ -124,7 +174,7 @@ def build_srt(lines: list[LyricLine], *, max_chunk_duration: float = 1.5,
             end = min(end, next_start)                        # never overlap the next caption
         else:
             end = max(word_end + TAIL_HOLD, start + MIN_DUR)
-        end = max(end, start + 0.3)                           # absolute floor
+        end = max(end, start + MIN_VISIBLE)                   # absolute floor
         out.append(
             f"{i + 1}\n"
             f"{seconds_to_srt_time(start)} --> {seconds_to_srt_time(end)}\n"
@@ -146,7 +196,7 @@ def build_premiere_transcript(lines: list[LyricLine], *, language: str = "en-us"
 
     segments = []
     for line in lines:
-        words = line.words
+        words = [w for w in line.words if _is_caption_word(w.word)]
         if not words:
             continue
         word_objs = []

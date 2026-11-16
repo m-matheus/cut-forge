@@ -6,6 +6,7 @@ sung vocals correctly (it typically misses ~30% of words in musical tracks).
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -31,10 +32,17 @@ def align_words(
     (``denoiser="demucs"``) so alignment locks onto the singing, and use Silero
     ``vad`` instead of fragile volume-based silence detection when a beat fills the
     gaps. ``min_word_dur`` keeps fast bars from being force-widened.
+
+    ``nonspeech_skip`` stays off. With it, a sparse intro (a few spoken words, then 5s+ of
+    instrumental) cuts the audio window short while every remaining word is still pending,
+    so stable-ts squeezes a whole verse onto one instant at the start of the break.
     """
     # Version tag bumped when alignment params change so stale caches (produced
     # before Demucs/VAD) are not silently reused. Bump it again on future tuning.
-    cache_key = f"stable-align-v2-demucs-{model_name}-{language}"
+    # The fingerprint ties the cache to this exact lyrics + audio pair: timestamps
+    # computed for another take or another sheet mean nothing here.
+    fingerprint = hashlib.sha1(text.encode("utf-8") + audio_path.read_bytes()).hexdigest()[:12]
+    cache_key = f"stable-align-v3-demucs-noskip-{model_name}-{language}-{fingerprint}"
 
     if cache_path and cache_path.exists() and not refresh:
         cached = json.loads(cache_path.read_text(encoding="utf-8"))
@@ -62,6 +70,7 @@ def align_words(
         vad=True,            # Silero VAD masks instrumental gaps (robust over a constant beat)
         suppress_silence=True,
         min_word_dur=0.05,   # don't force-widen fast rap syllables
+        nonspeech_skip=None,
     )
 
     out: list[dict] = []

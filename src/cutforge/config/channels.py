@@ -50,6 +50,33 @@ class CaptionSpec(BaseModel):
         return self.default_color
 
 
+class SpotifySpec(BaseModel):
+    """Release as an ARTIST through a distributor, and the video's "on Spotify" call.
+
+    The release step fills the distributor's form; the premiere step lays a QR code over
+    the intro that opens the song (``spotify_track_url`` on the run) or, until that link
+    exists, the artist profile.
+    """
+    artist_url: str = ""        # https://open.spotify.com/artist/... once the profile exists
+    artist_name: str = ""       # "" = the channel name
+    songwriter: str = ""        # legal name(s): distributors and Spotify require a real name
+    title_template: str = "{song} ({character} Rap)"
+    genre: str = "Hip-Hop/Rap"
+    notice_start: float = 1.0   # seconds into the song
+    notice_duration: float = 8.0
+    qr_center: tuple[float, float] = (0.87, 0.30)   # frame fractions; clear of the captions
+    qr_height_frac: float = 0.2                    # ~216 px at 1080p
+    notice_text: dict[str, str] = Field(default_factory=lambda: {
+        "en": "LISTEN ON SPOTIFY", "es": "ESCÚCHALA EN SPOTIFY", "pt": "OUÇA NO SPOTIFY",
+    })
+
+    @property
+    def artist_link(self) -> str:
+        """The public artist link, or "" (artists.spotify.com only opens for the owner)."""
+        url = self.artist_url.strip().split("?")[0]
+        return url if url.startswith("https://open.spotify.com/") else ""
+
+
 class Channel(BaseModel):
     name: str
     slug: str
@@ -61,6 +88,7 @@ class Channel(BaseModel):
     captions: CaptionSpec = Field(default_factory=CaptionSpec)
     assets: dict[str, str] = Field(default_factory=dict)
     description_template: str = ""
+    spotify: SpotifySpec = Field(default_factory=SpotifySpec)
 
     # Populated by the loader — absolute path to this channel's directory.
     root_dir: Path | None = None

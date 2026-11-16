@@ -70,14 +70,11 @@ def test_premiere_export_roundtrip(run_project, monkeypatch):
     out = premiere_service.build_project(project)
     assert out.exists()
 
-    # The title card PNG was generated alongside the XML.
-    assert project.title_card_path.exists()
-
     # Round-trip: re-read the XML with OTIO and validate structure.
     back = otio.adapters.read_from_file(str(out), adapter_name="fcp_xml")
     video_tracks = [t for t in back.tracks if t.kind == otio.schema.TrackKind.Video]
     audio_tracks = [t for t in back.tracks if t.kind == otio.schema.TrackKind.Audio]
-    assert len(video_tracks) == 2  # V1 footage + V2 title-card overlay
+    assert len(video_tracks) == 1  # V1 footage (V2 Spotify QR only with a Spotify link)
     assert len(audio_tracks) == 1
 
     markers = [m for c in back.find_clips() for m in c.markers]
@@ -85,7 +82,7 @@ def test_premiere_export_roundtrip(run_project, monkeypatch):
     names = {m.name for m in markers}
     assert "Shadow Monarch" in names
 
-    # The title-card still declares its pixel size so Premiere links it (no "Media offline").
+    # The sequence declares its pixel size so Premiere doesn't scale the overlays.
     xml_text = out.read_text(encoding="utf-8")
     assert "<samplecharacteristics>" in xml_text
     assert "1920" in xml_text and "1080" in xml_text

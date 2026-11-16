@@ -17,16 +17,14 @@ of drifting back toward the reference.
 from __future__ import annotations
 
 import json
+import re
+import statistics
 
 from cutforge.integrations import anthropic_client
 from cutforge.models.lore import ReferenceLoreProfile
+from cutforge.services import catalog_service, lyrics_lint_service
 from cutforge.models.project import VideoProject
-from cutforge.models.song import (
-    CreativeDirection,
-    GenreDirection,
-    GenreSuggestions,
-    SongPackage,
-)
+from cutforge.models.song import CreativeDirection, SongPackage
 from cutforge.models.story import StoryContentProfile
 from cutforge.models.structure import NarrativeStructureProfile
 
@@ -41,46 +39,125 @@ HOW TO WRITE THE SUNO "STYLE" STRING
 Suno generates AUDIO, not video. The style field describes ONLY what you HEAR.
 
 Formula — order matters, Suno weights the leading tokens most:
-  <dominant subgenre>, <mood/energy>, <vocal: gender + delivery>, <2–4 signature
-  instruments with qualities>, <production word>, <one BPM number> BPM
+  <specific subgenre>, <1–2 signature instruments>, <vocal plan>, <mood and dynamics>,
+  <one BPM number> BPM
 
 Rules:
-- Lead with a SPECIFIC subgenre ("dark trap", "UK drill", "boom bap", "melodic trap",
-  "orchestral trap") — never bare "hip-hop" or "rap".
-- 8–14 comma-separated descriptors, ~120–200 characters.
+- KEEP IT LEAN: 6–8 comma-separated descriptors, ~80–140 characters, never over 200. Every extra
+  instrument dilutes the mix — Suno averages a long list ("taiko, koto, choir, strings,
+  808, drill hats...") into generic "epic" mush. One sonic idea, 1–2 signature instruments
+  ("sad piano, deep 808", "distorted 808 bass, sliding drill hi-hats").
+- Lead with a SPECIFIC subgenre ("emotional dark trap", "UK drill", "boom bap", "melodic
+  trap", "orchestral trap") — never bare "hip-hop" or "rap".
 - Exactly ONE BPM number (e.g. "140 BPM"), never a range.
-- Vocal: character + delivery: "aggressive rapped male vocal", "anthemic sung hook",
-  "confident rap flow", "deadpan delivery". For rap add "rap vocals" or "spoken flow".
-- Instruments: 2–4 named + described: "distorted 808 bass", "dark minor piano",
-  "sliding drill hi-hats", "crisp trap hats", "warm guitar sample".
+- Vocal plan — say WHERE it raps and WHERE it sings. Default for emotional, tragic or epic
+  characters: "male rap verses, soaring sung chorus". Pure rap ("aggressive rapped male
+  vocal") only for a cold/menacing lane whose brief has no sung hook.
+- Mood and dynamics — the song's overall mood lives HERE, not in the lyrics tags. Name the
+  contrast so the track breathes: "dynamic build and drop", "quiet verses, explosive
+  chorus". Never one flat energy ("aggressive" from start to end).
 
 BANNED IN STYLE — these are VISUAL / meta terms Suno cannot hear:
   AMV, anime edit, anime rap, "cinematic anime rap", anime AMV, music video,
   montage, edit, clip, scene, 4K, visuals, "epic anime", any character/anime name,
+  any artist, band or producer name (the lanes named in this prompt included),
   "make it hard", "best song", narrative content about the plot.
 Translate that intent into SOUND. "Cinematic anime rap" → "orchestral trap, epic
 choir, soaring strings, booming 808s". The "anime" feel comes from the sonic palette,
 not from the word "anime". No contradictory genres ("trap, lofi chill").
 
-FORCE RAP (Suno defaults to melodic singing):
-Put "aggressive rap vocals" / "spoken flow" / "confident rap flow" in style, AND
-[Rap]/[Rapped] inline in the lyrics. Only use "autotune"/"melodic"/"sung" when you
-genuinely want sung sections.
+RAP vs SUNG: rapped verses come from "rap verses" in the style + a rap tag on each verse;
+a sung hook comes from "sung chorus" in the style + [Sung, ...] on the chorus. The
+contrast between the two is what makes the hook land — don't kill it in the Exclude field.
 """
 
-N_GENRE_SUGGESTIONS = 5
-
 _SUNO_LYRICS_RULES = """\
-LYRICS FIELD — STRUCTURE AND DELIVERY TAGS
-Suno obeys bracketed tags in the Lyrics field (structure tags most reliably).
-- [Rap] / [Rapped] on each verse → forces rapping, not singing.
-- [Male Vocal] / [Female Vocal] → pins the voice gender.
-- [Gang Vocals] / [Chant] on the hook → anthemic group shout.
-- [Fast Rap] / [Double Time] / [Slow Flow] → cadence control.
-- Ad-libs in (parentheses) at line ends: (yeah) (uh) (gang).
+LYRICS FIELD — STRUCTURE, ENERGY AND DELIVERY TAGS
+Suno obeys bracketed tags in the Lyrics field. Use them to drive the ENERGY of each
+section, not just to label it.
+- Section tags: [Intro] [Verse 1] [Pre-Chorus] [Chorus] [Build] [Break] [Breakdown]
+  [Drop] [Bridge] [Final Chorus] [Outro] [End].
+- Say how each section sounds INSIDE its tag, in 2–4 words at most: [Intro: soft piano]
+  [Verse 1: calm rap] [Verse 2: aggressive rap] [Build: drums rising] [Drop: heavy 808]
+  [Verse 3: tender rap, piano] [Chorus: sung, emotional] [Final Chorus: belted, full choir]
+  [Outro: spoken, voice breaking]. Suno sometimes SINGS long bracket text, so a tag is never
+  a sentence, and the song's overall mood goes in the STYLE string, not in tags.
+- Switch delivery mid-section with a short tag on its own line before the line(s) it covers:
+  [Shouted] for an outburst, [Spoken, flat] for a cold reply, [Whispered] for a secret.
+- [Break] holding ONE short spoken line = the beat cuts out right before an impact. It is
+  the strongest moment in the song — use it once.
+- [Male Vocal] / [Female Vocal] pin the voice gender; [Gang Vocals] / [Chant] give a group
+  shout (anthem-type hooks only).
+- A sound effect or scene direction is a short tag on its own line: [Chains rattle]
+  [Bell tolls]. NEVER put it in parentheses: Suno SINGS parenthetical text as a backing vocal.
+- (Parentheses) are ONLY for ad-libs that MUST be sung: (yeah) (one more time).
 - Anything NOT bracketed or in parentheses WILL be sung as lyrics.
-- Section-length caps (over-long → Suno rushes delivery): verses 4–8 lines,
-  choruses 4–6, bridges 2–4. Put the strongest line FIRST in each section.
+"""
+
+_EMOTIONAL_CRAFT_RULES = """\
+EMOTIONAL CRAFT — what separates a song that HITS from generic AI rap
+These are TECHNIQUES, not expression: you may use them even when the reference does too.
+The originality rules apply to wording, never to craft.
+
+1. A LINE IS A BREATH. Suno gives each line its own rhythmic slot: short lines land with
+   weight, long lines get rushed into one flat stream. Sung, quiet and peak moments use
+   short lines (see FLOW TARGET); rap verses use the length in RAP CRAFT. Split a thought
+   that outgrows its line. A one-word line ("Fine." / "War.") is a rare accent for impact,
+   never a run of them.
+2. DEPTH OVER BREADTH. Dramatize the 4–6 SCENES of the brief, each with room to breathe
+   (one scene can fill a whole verse). Drop lore that does not serve the arc — a song that
+   touches every fact reads like a wiki page and moves nobody.
+3. SCENES, NOT SUMMARIES. Put the listener INSIDE the moment: direct dialogue in quotes
+   (a [Shouted] / [Spoken] tag per voice), what the character sees and hears, present-
+   tense urgency. A line of the argument itself beats a line describing the argument.
+4. PLAIN WORDS AT THE PEAKS. The most emotional lines are the simplest ("Then the mountain
+   fell."). Imagery and wordplay belong in the verses; at the peak the character just
+   says it.
+5. THE SONG MUST BREATHE. Follow the brief's ENERGY MAP: quiet open → rising → a silence
+   ([Break]) → impact ([Drop]) → biggest final moment → quiet outro. Never one energy from
+   start to end.
+6. THE HOOK IS SUNG AND SIMPLE. 6–8 short lines, open singable vowels, a phrase a viewer
+   can sing back after ONE listen. Strongest with a double meaning tied to the
+   character's core wound. The [Final Chorus] FLIPS it: rewrite 2–4 of its lines so the
+   hook pays off the arc — what it meant at the start is answered at the end — keeping the
+   rhyme sounds of the original chorus.
+7. PLANT AND PAY OFF. Use the brief's CALLBACK: plant the small concrete detail early (a
+   habit, an object, a phrase) and bring it back at the end with new meaning.
+8. THE OUTRO LANDS IT. The quietest, most direct lines of the song, in the character's
+   voice — no new lore, just the last thing they would say.
+"""
+
+_RAP_CRAFT_RULES = """\
+RAP CRAFT — for every section or passage tagged as rap
+- RHYME: every rap verse has a rhyme scheme, with end rhymes and internal rhymes. Free verse
+  belongs only in spoken or deliberately poetic passages.
+- LENGTH: 8–14 syllables per line, most lines 8–10 (about 6–8 words). More than 10 words is
+  too long: Suno rushes dense lines into a flat stream. Split a thought that does not fit
+  across two rhymed lines instead of packing it into one.
+- NO CHOPPING: never stack runs of 1–3-word lines in a rap verse, they come out as a broken,
+  stop-start flow. A short line is a single accent between full lines.
+- This length is for RAP only. Sung hooks, [Break], quiet sections and the outro keep their
+  short lines.
+- When a chorus repeats with variation, keep the rhyme sounds of the original chorus.
+"""
+
+_COHERENCE_RULES = """\
+COHERENCE — the song must hold up for a fan who knows the story
+- FACTS: every reference to an existing character's story stays faithful to the order and
+  context of the events. Never confuse WHEN something happened.
+- AMBIGUITY: avoid words a listener could take the wrong way (literal vs. figurative).
+- CONTRADICTIONS: no section may say or imply the opposite of another section.
+- INVENTED TERMS: never coin a word that sounds like it belongs to the universe but does not
+  exist in it. Use the canonical name or plain words.
+"""
+
+_PRONUNCIATION_RULES = """\
+PRONUNCIATION
+Suno mispronounces proper names and foreign words. Keep the canonical spelling in "lyrics",
+because the lyrics also become on-screen captions, and list each hard word in
+"pronunciations" with an English phonetic respelling that Suno reads correctly, syllables
+separated by hyphens, e.g. {"Mangekyou": "Mahn-geh-kyoh", "Auswählen": "Ows-vay-len"}. Only
+list words Suno would likely get wrong; use {} when there are none.
 """
 
 # ---------------------------------------------------------------------------
@@ -123,8 +200,8 @@ A reference track is provided. It contributes EXACTLY ONE thing to this song: th
 world — genre/subgenre, BPM, energy, beat character, instrument palette, vocal delivery
 and flow density. Nothing else.
 - Target roughly the given BPM; put ONE number in the style string.
-- Flow: match line length and syllables-per-bar to the reference. Faster/denser
-  reference → shorter, denser lines; slower → more spacious lines.
+- Flow: the FLOW TARGET gives the line length measured from the reference — match it
+  outside the rap verses.
 - Do NOT add orchestral strings, choir or cinematic elements unless the reference
   itself has them. Trap stays trap; drill stays drill; boom-bap stays boom-bap.
 - The reference's WORDS, themes, hooks and metaphors are OFF-LIMITS for the style. Any
@@ -277,11 +354,18 @@ def _format_direction_for_prompt(direction: CreativeDirection) -> str:
     if direction.hook_concept:
         parts.append(f"- Hook concept: {direction.hook_concept}")
     if direction.key_lore_points:
-        parts.append("- Key lore points to weave in: " + "; ".join(direction.key_lore_points))
+        parts.append("- Scenes to dramatize (give each room — depth over breadth):")
+        parts += [f"    • {p}" for p in direction.key_lore_points]
+    if direction.energy_map:
+        parts.append(f"- ENERGY MAP (tag each section accordingly): {direction.energy_map}")
+    if direction.callback:
+        parts.append(f"- CALLBACK (plant early, pay off at the end): {direction.callback}")
     if direction.original_metaphor_direction:
-        parts.append(f"- Original metaphor direction: {direction.original_metaphor_direction}")
+        parts.append(f"- Recurring imagery: {direction.original_metaphor_direction}")
     if direction.delivery_personality:
         parts.append(f"- Delivery personality: {direction.delivery_personality}")
+    if direction.intro_concept:
+        parts.append(f"- Intro concept: {direction.intro_concept}")
     if direction.things_to_avoid:
         parts.append("- Things to avoid: " + "; ".join(direction.things_to_avoid))
     return "\n".join(parts)
@@ -358,46 +442,139 @@ def _format_story_for_prompt(story: StoryContentProfile, *, new_hook: bool) -> s
     return "\n".join(parts)
 
 
+# Line-density defaults (no usable reference lyrics) and clamps, for everything but rap
+# verses (see RAP CRAFT). A ~4-word line is one breath; the Obito A/B test showed 9–10-word
+# lines get rushed into a flat stream.
+_DEFAULT_WORDS_PER_LINE = 4.5
+_DEFAULT_TOTAL_WORDS = 600
+_WORDS_PER_LINE_RANGE = (3.0, 7.0)
+_TOTAL_WORDS_RANGE = (450, 700)
+# Mean words per line (rap included) past which the song approaches the density that lost
+# that A/B test.
+_DENSE_MEAN_WORDS_PER_LINE = 8
+
+
+def _flow_target(reference_profile: dict | None) -> tuple[float, int, str]:
+    """``(words_per_line, total_words, note)`` for the writer's FLOW TARGET.
+
+    Measured from the reference lyrics when they are real lyric lines (pasted or from
+    subtitles) — Whisper segments are not lyric lines, so they fall back to the defaults.
+    """
+    profile = reference_profile or {}
+    if profile.get("lyrics_source") in ("manual", "subtitles"):
+        counts = [len(ln.split()) for ln in (profile.get("transcript") or "").splitlines()
+                  if ln.strip()]
+        if len(counts) >= 20:
+            median = statistics.median(counts)
+            wpl = min(max(float(median), _WORDS_PER_LINE_RANGE[0]), _WORDS_PER_LINE_RANGE[1])
+            total = min(max(round(sum(counts) * 0.8), _TOTAL_WORDS_RANGE[0]),
+                        _TOTAL_WORDS_RANGE[1])
+            note = (f"measured from the reference lyrics: median {median:g} words/line, "
+                    f"{len(counts)} lines, {sum(counts)} words")
+            return wpl, total, note
+    return _DEFAULT_WORDS_PER_LINE, _DEFAULT_TOTAL_WORDS, "channel default"
+
+
+def _format_flow_target(wpl: float, total: int, note: str) -> str:
+    return "\n".join([
+        f"FLOW TARGET ({note}):",
+        f"- Sung, quiet and peak lines: ~{wpl:g} words per line — one breath.",
+        "- Rap verses: 8–14 syllables per line, most 8–10 (about 6–8 words), per RAP CRAFT, "
+        "whatever the number above says.",
+        f"- ~{total} words total (≈3.5–4 min on Suno). This is a budget, do not exceed it.",
+    ])
+
+
+def _words_per_line(lyrics: str) -> tuple[float, int]:
+    """Mean sung words per line and the line count (tags and ad-libs ignored)."""
+    lines = catalog_service.sung_text(lyrics).splitlines()
+    if not lines:
+        return 0.0, 0
+    return sum(len(ln.split()) for ln in lines) / len(lines), len(lines)
+
+
+def suno_lyrics(lyrics: str, pronunciations: dict[str, str]) -> str:
+    """The sheet to paste into Suno: hard words respelled, everything else as written.
+
+    ``lyrics.txt`` keeps the canonical names because captions, the release lyrics and the
+    metadata read it, so this is derived from it instead of being stored as a second copy.
+    """
+    return _swap_terms(lyrics, pronunciations)
+
+
+def canonical_lyrics(sheet: str, pronunciations: dict[str, str]) -> str:
+    """Undo ``suno_lyrics``: a sheet read back from Suno, with the canonical names restored."""
+    return _swap_terms(sheet, {respelling: term for term, respelling in pronunciations.items()})
+
+
+def _swap_terms(lyrics: str, swaps: dict[str, str]) -> str:
+    """Replace whole words per ``swaps`` (any case), leaving [tag] lines as written."""
+    terms = sorted((t for t, new in swaps.items() if t.strip() and new.strip()),
+                   key=len, reverse=True)
+    if not terms:
+        return lyrics
+    swap = {t.lower(): swaps[t].strip() for t in terms}
+    pattern = re.compile(r"(?<!\w)(?:" + "|".join(map(re.escape, terms)) + r")(?!\w)",
+                         re.IGNORECASE)
+    return "\n".join(
+        ln if ln.lstrip().startswith("[")
+        else pattern.sub(lambda m: swap[m.group(0).lower()], ln)
+        for ln in lyrics.splitlines()
+    )
+
+
 # ---------------------------------------------------------------------------
 # System prompts
 # ---------------------------------------------------------------------------
 
-SUGGEST_SYSTEM_PROMPT_BASE = f"""\
-You are a producer for an anime-rap channel in the lane of BASARA, MHRAP, Tauz M4RKIM, ANIRAP and 7 Minutoz. Given a character (or matchup), propose distinct GENRE/VIBE
-directions for an original song.
+_SONIC_DIRECTION_RULES = f"""SONIC DIRECTION — you also pick the SOUND of the song ("sonic_direction").
+- If the user forced a genre, the sonic_direction is in that genre.
+- If a reference is given, stay in its lane and BPM; vary only within it.
+- Otherwise pick by the character's archetype (the GENRE SELECTION list, if given).
+- If a CHANNEL CATALOG with previous styles is given: do NOT reuse the subgenre of the
+  3 most recent songs, nor their vocal-delivery + instrument combination, unless the
+  forced genre or the reference lane requires it — then change the signature instruments
+  and energy instead. Listeners hear the catalog back to back.
+- Write it as a Suno style seed following these rules:
 
 {_SUNO_STYLE_RULES}
-
-OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
-{{
-  "character_read": "1–2 sentences on the character's vibe that should drive the music",
-  "directions": [
-    {{
-      "label": "Short genre name (e.g. 'Cold Drill')",
-      "style": "A Suno-ready style string following the formula above",
-      "why": "One sentence: why this fits the character"
-    }}
-  ]
-}}
-
-Rules:
-- Exactly {N_GENRE_SUGGESTIONS} directions, each clearly different from the others.
-- Each style must follow the formula and BANNED-terms rule above.
-- All descriptors in English.
 """
 
-SUGGEST_SYSTEM_PROMPT_NO_REF = SUGGEST_SYSTEM_PROMPT_BASE + f"""
-{_ARCHETYPE_RANGE_NO_REF}
+
+# Shared by both planners: plan for emotion (scenes, energy, callback) instead of coverage.
+_DESIGN_FOR_EMOTION = """\
+DESIGN FOR EMOTION, NOT COVERAGE. A song that touches every fact reads like a wiki page.
+- Pick 4–6 SCENES that carry the arc — concrete moments (who, where, what is said) the
+  writer can put the listener inside, with dialogue where it fits. Let the rest go.
+- Plan the ENERGY MAP: where the song is quiet, where it builds, the ONE silence ([Break])
+  right before the biggest impact, the [Drop], the biggest final moment, the quiet outro.
+- The hook is SUNG and simple (unless this is a cold, pure-rap lane), ideally a double
+  meaning tied to the character's core wound, and the final chorus FLIPS it to pay off
+  the arc.
+- Plan a CALLBACK: a small concrete detail (a habit, an object, a phrase) planted early
+  and paid off at the end with new meaning.
+
 """
 
-SUGGEST_SYSTEM_PROMPT_WITH_REF = SUGGEST_SYSTEM_PROMPT_BASE + f"""
-GENRE FOLLOWS THE REFERENCE — when a reference is provided the {N_GENRE_SUGGESTIONS} directions must be
-anchored to the reference's lane and BPM. They are VARIATIONS within that lane (e.g.
-harder vs. more melodic, sparser vs. more orchestral), not three unrelated genres.
-Infer subgenre, energy, beat character and vocal style from the reference's SONIC DNA
-(BPM / onset density). Do NOT add orchestral strings / choir unless the reference itself
-has them. Every direction must still genuinely fit the character.
+_IMAGERY_SOURCING = """\
+IMAGERY SOURCING: imagery comes from the character's OWN universe — powers, techniques,
+weapons, creatures, locations, the source material's objects. Never translate the story
+into an unrelated real-world domain (legal/courtroom/wills, finance/debt/ledgers,
+corporate, sports, cooking, gambling) unless the character literally lives there. Abstract
+themes (legacy, destiny, inheritance) are voiced through concrete in-world objects.
+
 """
+
+# JSON fields shared by both planners' output formats (no trailing comma).
+_DIRECTION_CRAFT_FIELDS = """\
+  "hook_concept": "the SUNG hook — its concept (original, or the story's concept reworded if the user kept it), the double meaning it carries, and how the FINAL chorus flips it to pay off the arc",
+  "key_lore_points": ["4–6 SCENES to dramatize — each one concrete moment (who, where, what is said), not a fact list", "..."],
+  "energy_map": "section-by-section energy/delivery plan in one line, e.g. 'Intro whispered over piano → V1 calm rap → Chorus sung → V2 tension rising → Build → Break (one spoken line, silence) → V3 tender, piano only → Drop aggressive → Bridge cold then cracking → Final Chorus belted, choir → Outro spoken, quiet'",
+  "callback": "the small concrete detail planted early (a habit, object or phrase) and the moment at the end where it returns with new meaning",
+  "original_metaphor_direction": "1–2 recurring in-world images (an object, sound or place from the character's world) the song returns to — NOT an elaborate metaphor system; the emotional peaks stay in plain words. 1–2 sentences.",
+  "delivery_personality": "the persona/attitude, and where it raps vs where it sings",
+  "intro_concept": "how THIS song opens, in one line: pick a shape (cold open in the character's voice, an in-world sound as a short [tag], a one-word chant, a question to the listener, a scene-setter, or the bare producer tag) and the specific moment/sound/word it uses. It must differ from every intro in the CHANNEL CATALOG if one is given, and never use the frames \\"This one's for...\\" or \\"<Name>, the boy who...\\"\""""
+
 
 # Creative-direction planner — the brief-writer that answers "what is the NEW song?".
 CREATIVE_DIRECTION_SYSTEM_PROMPT = """\
@@ -414,35 +591,23 @@ Inputs you may receive:
 - mined CHARACTER LORE (facts, abilities, events, easter eggs) — knowledge to draw from.
 
 Design an original direction: pick a fresh core theme and narrative angle, an emotional
-arc, an original hook concept, the specific lore points worth weaving in, a direction for
-NEW metaphors (not the reference's), and the delivery personality. In "things_to_avoid",
-explicitly include reusing the reference's expression (its hooks, metaphors, phrasing,
-structure) and any clichés that would make the song generic.
+arc, an original hook concept, the scenes worth dramatizing, recurring imagery (not the
+reference's), and the delivery personality. In "things_to_avoid", include reusing the
+reference's expression (its hooks, metaphors, phrasing) and any clichés that would make
+the song generic.
 
 Prefer specific, character-grounded ideas over generic hype. If strong easter eggs /
 obscure lore exist, prioritise them — they make the song feel authentic and specific.
 
-NON-NEGOTIABLE — METAPHOR SOURCING: The metaphor world must be built from the character's
-OWN universe — their powers, techniques, forms, weapons, gear, creatures, locations and the
-source material's own imagery. You may NOT translate the character's story into an unrelated
-real-world domain. Specifically BANNED as metaphor systems (unless the character literally
-lives in that world): legal/courtroom (wills, estates, deeds, inheritance law, verdicts,
-contracts), finance/accounting (debt, ledgers, rent, leases, invoices, interest),
-corporate/business, sports, cooking, and gambling. Abstract themes like 'inheritance',
-'legacy', 'debt of hatred' or 'destiny' are allowed as IDEAS but must be voiced through
-concrete in-world imagery — blood, the awakened eye, the clan's fire, the scratched
-headband — never through paperwork, money, property or contracts.
-
+""" + _DESIGN_FOR_EMOTION + _IMAGERY_SOURCING + _SONIC_DIRECTION_RULES + """
 OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
 {
+  "sonic_direction": "a Suno-ready style seed in one line, per SONIC DIRECTION above",
   "core_theme": "the central idea of the NEW song, in one line",
   "narrative_angle": "the fresh POV/approach (e.g. 'first-person vow at his lowest moment')",
   "emotional_arc": "how the feeling evolves across the song",
-  "hook_concept": "an ORIGINAL hook idea — the concept, not finished lyrics",
-  "key_lore_points": ["specific facts/abilities/easter eggs to weave in", "..."],
-  "original_metaphor_direction": "A NEW angle within the reference's thematic universe, but the IMAGERY must be sourced ONLY from the character's actual in-world reality — their canonical powers, techniques, weapons, transformations, creatures, locations and the anime's own objects and visuals. Every governing image MUST literally exist in the character's world. HARD BAN: never build the metaphor system out of abstract real-world domains the character does not inhabit — no legal/court/estate/will/inheritance-law, no finance/debt/ledger/rent/lease/accounting, no corporate/business, no sports, no cooking, no gambling — unless the character literally comes from that world. Render even abstract themes (legacy, inheritance, destiny) through concrete in-world objects, not through paperwork, money or contracts. One concrete in-world metaphor system in 1-2 sentences.",
-  "delivery_personality": "the rap persona/attitude and cadence feel",
-  "things_to_avoid": ["reference's hook/metaphors/phrasing", "generic clichés", "..."]
+""" + _DIRECTION_CRAFT_FIELDS + """,
+  "things_to_avoid": ["reference's hook/metaphors/phrasing (its techniques — dialogue, short lines, silence — are fair game)", "generic clichés", "..."]
 }
 Return ONLY the JSON object.
 """
@@ -474,27 +639,18 @@ references, the delivery personality, and the hook decision (respect whether a n
 was requested). In "things_to_avoid", explicitly include lifting or lightly paraphrasing
 the reference's wording, rhymes or hook, and any clichés.
 
-NON-NEGOTIABLE — METAPHOR SOURCING: The metaphor world must be built from the character's
-OWN universe — their powers, techniques, forms, weapons, gear, creatures, locations and the
-source material's own imagery. You may NOT translate the character's story into an unrelated
-real-world domain. Specifically BANNED as metaphor systems (unless the character literally
-lives in that world): legal/courtroom (wills, estates, deeds, inheritance law, verdicts,
-contracts), finance/accounting (debt, ledgers, rent, leases, invoices, interest),
-corporate/business, sports, cooking, and gambling. Abstract themes like 'inheritance',
-'legacy', 'debt of hatred' or 'destiny' are allowed as IDEAS but must be voiced through
-concrete in-world imagery — blood, the awakened eye, the clan's fire, the scratched
-headband — never through paperwork, money, property or contracts.
+The story is fixed, but you still choose its SCENES: pick the 4–6 story points that carry
+the arc and give them room; the rest can be a single line or skipped.
 
+""" + _DESIGN_FOR_EMOTION + _IMAGERY_SOURCING + _SONIC_DIRECTION_RULES + """
 OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
 {
+  "sonic_direction": "a Suno-ready style seed in one line, per SONIC DIRECTION above",
   "core_theme": "the story's central idea (kept from the STORY block, in one line)",
   "narrative_angle": "the story's POV/approach (kept — how it is TOLD, re-expressed)",
   "emotional_arc": "the arc from the STORY block (kept; may be phrased in your words)",
-  "hook_concept": "the hook idea to use — kept-but-reworded, or brand-new if requested",
-  "key_lore_points": ["specific facts/ideas to weave in while retelling", "..."],
-  "original_metaphor_direction": "A concrete metaphor SYSTEM sourced ONLY from the character's actual in-world reality — their canonical powers, techniques, transformations, weapons, creatures, locations, objects, and the anime's own visual imagery (for a Naruto shinobi: the Sharingan, Amaterasu, chakra, jutsu, kunai/shuriken, the clan crest, the Hidden Leaf). Every governing image MUST be something that literally exists in this character's world. HARD BAN: do NOT build the metaphor system out of abstract real-world domains the character does not literally inhabit — no legal/court/estate/will/inheritance-law imagery, no finance/debt/ledger/rent/lease/accounting imagery, no corporate/business, no sports, no cooking, no gambling. A thematically correct idea such as 'inheritance of hatred' must be expressed through in-world objects (blood, bloodline, the awakened eye, the clan's undying fire) — NEVER through wills, estates, ledgers, rent or leases. Exception: only use a real-world domain if the character literally comes from it (e.g. a chef character may use cooking imagery). Give ONE concrete in-world metaphor system in 1-2 sentences.",
-  "delivery_personality": "the rap persona/attitude and cadence feel",
-  "things_to_avoid": ["reference's exact wording/rhymes/hook", "line-by-line mirroring", "generic clichés", "..."]
+""" + _DIRECTION_CRAFT_FIELDS + """,
+  "things_to_avoid": ["reference's exact wording/rhymes/hook (its techniques — dialogue, short lines, silence — are fair game)", "line-by-line mirroring", "generic clichés", "..."]
 }
 Return ONLY the JSON object.
 """
@@ -548,58 +704,76 @@ TWO AXES — keep them separate:
 
 {_SUNO_LYRICS_RULES}
 
+{_EMOTIONAL_CRAFT_RULES}
+
+{_RAP_CRAFT_RULES}
+
+{_COHERENCE_RULES}
+
+{_PRONUNCIATION_RULES}
+
 THE "EXCLUDE" FIELD
-Return a short comma-separated Exclude Styles list to stop Suno from drifting.
-For a hard rap track: "singing, melodic vocals, auto-tune, sung chorus".
-For a melodic track: "harsh, distorted, aggressive, screaming".
-Keep it short (3–6 terms).
+Return 3–5 comma-separated terms that would wreck THIS song, e.g. "female vocals, heavy
+autotune, lo-fi, EDM". Do NOT exclude singing / melodic vocals when the song has a sung
+hook (the default). Only a cold, pure-rap song with a rapped hook may exclude "singing,
+sung chorus".
 
 LYRICS STRUCTURE
-Write AT LEAST ~2.5 minutes of material. A reliable arrangement:
-  [Intro] → [Verse 1] → [Chorus] → [Verse 2] → [Chorus] → [Bridge] → [Verse 3] → [Outro]
-[Intro] style — open with a [Spoken] producer shoutout tag that is JUST the channel-name
-call-out and NOTHING more: if a "Channel name" is given in the user prompt, say it plainly
-(e.g. "Enkai again...", "another one from Enkai...", "Enkai, let's go..."). Do NOT dress the
-tag up — no "one more for the archive", no "a ritual I can't stop performing", no metaphor,
-no poetry; it is only the artist saying their name. Then follow with 1-2 SHORT, plain hype
-lines that name who the song is about and what they represent (e.g. "This one's for the last
-Uchiha", "Sasuke, the avenger"). 3-4 lines total — a quick entry moment, NOT a metaphor
-section, NOT verse content.
+Length: ~3.5–4 minutes — the FLOW TARGET in the user prompt gives the word budget. The whole
+sheet, tags included, must stay under {lyrics_lint_service.SUNO_LYRICS_MAX_CHARS} characters or Suno cuts it.
+A proven emotional arrangement (adapt it to the brief's ENERGY MAP):
+  [Intro] → [Verse 1] → [Chorus] → [Verse 2] → [Build] → [Break] → [Verse 3] →
+  [Breakdown] → [Drop] → [Chorus] → [Bridge] → [Final Chorus] → [Outro]
+The first [Chorus] lands right after Verse 1 (within the first minute).
+Section sizes in lines: rap verses 12–20, chorus 6–8, build 4–8, break 1, breakdown 6–12,
+bridge 6–12, outro 4–10. Strongest line FIRST in each section.
+[Intro] style — a quick entry moment of 2-6 short lines, NOT a metaphor section, NOT verse
+content. It must contain the producer tag: if a "Channel name" is given in the user prompt,
+the artist says it plainly, ONCE, in a [Spoken] (or [Whispered]) line — just the name, maybe
+one plain word around it. Do NOT dress the tag up — no metaphor, no poetry, no "one more for
+the archive"; it is only the artist saying their name.
+Every song needs a DIFFERENT intro. Build it from the creative direction's "intro_concept";
+the shapes available include (and are not limited to):
+  - cold open: one line IN the character's voice from a specific moment, then the tag;
+  - sound first: an in-world sound as a short bracket tag — [Chains rattle], [Bell tolls] —
+    then the producer tag and one concrete image;
+  - chant: one word or name from the lore repeated as a chant, the tag cutting through it;
+  - question/challenge to the listener about the character;
+  - scene-setter: where and when we are (the battlefield, the night of the massacre);
+  - the tag alone over the beat, then straight into the verse (a 1-line intro is fine).
+The tag may come first, last or in the middle. NEVER use the frames "This one's for..." or
+"<Name>, the boy/man who..." and never open with "<channel> again" — the channel has
+overused them. If a CHANNEL CATALOG block is given, the intro must not resemble any intro in
+it (frame, sentence shape, epithet style).
 The channel name is the ARTIST / producer tag ONLY. It is NOT the character, NOT a person in
 the story, and must appear ONLY inside this [Intro] tag — NEVER in a verse, chorus, pre-chorus,
 bridge or [Outro], and NEVER spoken as if it were the character or part of their world.
-[Outro] style — a short closing beat in the CHARACTER's own voice (or about them): a final
-vow, image or callback drawn from THEIR world (their powers, clan, arc). Do NOT put the
-channel name / producer tag here — that belongs only in the [Intro].
-This is a STARTING POINT — adapt to the genre/reference's own arrangement:
-  - Drop-driven beat → [Build] then [Drop] timed to the character's signature moment.
-  - Emotional / melodic → fewer, sung-heavy hooks; maybe [Instrumental Break]; drop the
-    gang-vocal chant.
+[Outro] style — the quietest, most direct closing lines, in the CHARACTER's own voice: the
+last thing they would say, ideally paying off the CALLBACK. Do NOT put the channel name /
+producer tag here — that belongs only in the [Intro].
+Adapt to the genre:
+  - Cold / menacing pure-rap lane → the hook may be a rapped chant instead of sung; keep
+    the [Break] → [Drop] contrast anyway.
   - Cypher / anthem → verse-per-character feel, [Gang Vocals] + [Chant] on the hook.
-  - Boom-bap / rap rock → posse-trade verses, sing-along chant hook.
-Section caps: verses 4–8 lines, choruses 4–6, bridges 2–4. Strongest line FIRST.
-For a vs / matchup: alternate perspectives, make the chorus the clash.
+For a vs / matchup: alternate perspectives (tag each voice), make the chorus the clash.
 
 TONE & CONTENT
-- The song is FROM or ABOUT the character — capture their personality, powers and arc
-  through vivid, specific, ORIGINAL imagery. Not a plot summary — a hype anthem.
-- Turn the mined lore, abilities and easter eggs into fresh metaphors and punchlines of
-  your own invention — never a restatement of how the reference phrased them.
-- Every metaphor and comparison must be drawn from the character's own world (their powers,
-  techniques, weapons, and the anime's own objects and imagery). Do NOT reach for abstract
-  real-world metaphor domains — legal/estate/will, finance/debt/ledger/rent/lease, corporate,
-  sports, cooking, gambling — unless the character literally belongs to that world. If a theme
-  is abstract (legacy, inheritance, destiny), picture it as an in-world object before you
-  write the line.
+- The song is FROM or ABOUT the character — their personality, powers and arc told
+  through SCENES (see EMOTIONAL CRAFT), never a plot summary.
+- Turn the mined lore, abilities and easter eggs into lines of your own invention — never
+  a restatement of how the reference phrased them.
+- Imagery comes from the character's own world (powers, techniques, weapons, the anime's
+  objects) — no metaphors from unrelated real-world domains (legal, finance, corporate,
+  sports, cooking, gambling) unless the character lives there.
 - Canonical ability/technique/form names (jutsu, powers, transformations — e.g. "Mangekyou
   Sharingan", "Amaterasu", "Rasengan", "Bankai") MUST appear verbatim — fans expect to hear
   the exact name and it is a mark of authenticity. What you EVOKE instead: the reference's
   own hook phrasing and lyrical catchphrases — rewrite those; keep canonical names.
-- Keep it hype and quotable — the hook should be something viewers scream in the comments.
+- The hook should be something viewers sing back in the comments.
 
 LINE RULES (lyrics also become on-screen karaoke captions)
-- Each line: roughly 4–9 words — natural caption length.
-- One idea per line. Clean, punchy.
+- Rap verses per RAP CRAFT; every other line per the FLOW TARGET in the user prompt (default
+  3–6 words). One breath, one idea per line.
 - No "yeah yeah" filler beyond intentional (parenthetical) ad-libs.
 
 OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
@@ -608,6 +782,7 @@ OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
   "style": "The Suno STYLE string — audio only, following the formula and banned-terms rule",
   "exclude": "Short comma-separated Suno Exclude-Styles list",
   "lyrics": "Full structured lyrics as one string. \\n for line breaks; each [tag] on its own line.",
+  "pronunciations": {{"hard word exactly as written in the lyrics": "English phonetic respelling"}},
   "suno_tips": "One short line of advice for the Suno generation"
 }}
 """
@@ -660,6 +835,118 @@ heroic, hype"). No commentary, no quotes, no markdown — just the descriptors l
 """
 
 
+INTRO_REWRITE_SYSTEM_PROMPT = """\
+You fix ONE section of a finished anime-rap song for Suno: its [Intro]. The intro echoes
+the channel's previous songs, and listeners hear them back to back. Write a NEW intro
+body that opens the same song differently.
+
+Rules:
+- 2-6 short lines (3-7 words each), a quick entry moment — not verse content.
+- Keep the producer tag: the channel name said plainly ONCE in a [Spoken] or [Whispered]
+  line, no metaphor around it. It may come first, last or in the middle.
+- Do NOT use any of the flagged phrases, nor the frames "This one's for...",
+  "<Name>, the boy/man who..." or "<channel> again".
+- Follow the intro concept if given; draw images and sounds from the character's world.
+- Delivery tags and sound effects in short [brackets] of at most 4 words. (Parentheses) only
+  for ad-libs that must be sung, because Suno sings whatever is inside them.
+
+OUTPUT FORMAT — a single valid JSON object, no markdown fences:
+{"intro": "the new [Intro] body only, without the [Intro] tag itself; \\n between lines"}
+"""
+
+
+REVIEW_SYSTEM_PROMPT = f"""\
+You are the final editor of an anime-rap song about to be generated on Suno AI. You receive a
+finished draft. Correct what breaks the rules below and leave everything else alone.
+
+{_SUNO_LYRICS_RULES}
+
+{_RAP_CRAFT_RULES}
+
+{_COHERENCE_RULES}
+
+{_PRONUNCIATION_RULES}
+
+HOW TO EDIT
+- Check every reference against the CHARACTER LORE, when given, and what you know of the source
+  material. If you cannot confirm a fact or a term, rewrite the line so it no longer depends on it.
+- Keep what works: the section order, the scenes, the hook and its double meaning, the callback,
+  the plain words at the emotional peaks, and canonical names spelled correctly.
+- Change only the lines that need it, in the song's voice, with your own words. Never add
+  sections or lengthen the song. The channel name stays only in the [Intro].
+
+OUTPUT FORMAT — a single valid JSON object, no markdown fences, no commentary:
+{{
+  "lyrics": "the full corrected lyrics as one string. \\n for line breaks; each [tag] on its own line.",
+  "pronunciations": {{"hard word exactly as written in the lyrics": "English phonetic respelling"}},
+  "changes": ["one short line per fix: what changed and which rule it broke", "..."]
+}}
+"""
+
+
+def _deduplicate_intro(lyrics: str, catalog: list, direction: CreativeDirection,
+                       channel_name: str, log) -> str:
+    """Rewrite the [Intro] once if it reuses wording from the catalog's intros."""
+    intro = catalog_service.section(lyrics, "intro")
+    echoes = catalog_service.echoed_intro_phrases(intro, catalog)
+    if not echoes:
+        return lyrics
+    log(f"Intro echoes previous songs ({'; '.join(echoes)}) — rewriting the intro.")
+    previous = [f"- {s.intro.replace(chr(10), ' / ')}" for s in catalog if s.intro]
+    user_prompt = "\n".join([
+        f"Channel name: {channel_name}" if channel_name else "No channel name.",
+        f"Intro concept: {direction.intro_concept}" if direction.intro_concept else "",
+        "", "Flagged phrases (copied from previous intros): " + "; ".join(echoes),
+        "", "Previous intros on the channel:", *previous,
+        "", "The full song (rewrite ONLY its [Intro] body):", lyrics,
+        "", "Return only valid JSON.",
+    ])
+    data = anthropic_client.complete_json(INTRO_REWRITE_SYSTEM_PROMPT, user_prompt)
+    new_intro = (data.get("intro") or "").strip()
+    if not new_intro:
+        return lyrics
+    still = catalog_service.echoed_intro_phrases(new_intro, catalog)
+    if still:
+        log(f"New intro still echoes: {'; '.join(still)} — kept it anyway, review by hand.")
+    return catalog_service.replace_section(lyrics, "intro", new_intro)
+
+
+def _read_pronunciations(data: dict) -> dict[str, str]:
+    raw = data.get("pronunciations")
+    return {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
+
+
+def _review_lyrics(lyrics: str, pronunciations: dict[str, str], *, topic: str,
+                   direction: CreativeDirection, lore_profile: ReferenceLoreProfile | None,
+                   log) -> tuple[str, dict[str, str]]:
+    """Second pass over the draft. A failed review keeps the draft: it has already been paid for."""
+    lint = lyrics_lint_service.lint_lyrics(lyrics)
+    flagged = lint.warnings + lyrics_lint_service.check_length(lyrics)
+    parts = [f"Character / matchup: {topic}", "", _format_direction_for_prompt(direction)]
+    if lore_profile and not lore_profile.is_empty():
+        parts += ["", _format_lore_for_prompt(lore_profile)]
+    if flagged:
+        parts += ["", "Flagged by the automatic checks (in Portuguese):", *flagged]
+    parts += [
+        "", "Current pronunciations: " + json.dumps(pronunciations, ensure_ascii=False),
+        "", "The draft:", lyrics,
+        "", "Return only valid JSON.",
+    ]
+    log("Reviewing the lyrics against the rules and the lore...")
+    try:
+        data = anthropic_client.complete_json(REVIEW_SYSTEM_PROMPT, "\n".join(parts))
+    except Exception as exc:
+        log(f"Review failed ({exc}) — keeping the draft.")
+        return lyrics, pronunciations
+    reviewed = (data.get("lyrics") or "").strip()
+    if not reviewed:
+        log("Review came back empty — keeping the draft.")
+        return lyrics, pronunciations
+    for change in data.get("changes") or []:
+        log(f"Review: {change}")
+    return reviewed, _read_pronunciations(data) or pronunciations
+
+
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
@@ -675,58 +962,6 @@ def suggest_mood(character: str, anime: str = "") -> str:
     if not text:
         return ""
     return text.strip().strip('"').splitlines()[0]
-
-
-def suggest_genres(project: VideoProject, **_ignored) -> GenreSuggestions:
-    """Return genre directions for the project's character/topic.
-
-    When multiple references exist, each one produces its own set of directions
-    (anchored to its sonic lane). All sets are returned together so the UI can
-    accumulate and let the user pick freely.
-
-    Extra keyword args are accepted and ignored for signature compatibility.
-    """
-    from cutforge.services import reference_service
-
-    topic = project.topic or project.character
-    all_profiles = reference_service.load_all_reference_profiles(project)
-
-    all_directions: list[GenreDirection] = []
-    character_read = ""
-
-    if all_profiles:
-        for idx, profile in enumerate(all_profiles):
-            system = SUGGEST_SYSTEM_PROMPT_WITH_REF
-            lines = [f"Character / matchup: {topic}", ""]
-            lines += [
-                "REFERENCE SONIC DNA (derive the genre/lane from this — sound only):",
-                f"- BPM: {profile.get('bpm')} — use this one number in every style string",
-                f"- Onset density: {profile.get('onset_rate_per_sec')} onsets/s",
-                f"- Title: {profile.get('source_title')}",
-                "",
-                f"Propose {N_GENRE_SUGGESTIONS} directions. All {N_GENRE_SUGGESTIONS} must stay in the reference's lane and use its BPM. "
-                "Vary within the lane (e.g. harder vs. more melodic). Every direction must also "
-                "fit the character's personality.",
-                "Return only valid JSON.",
-            ]
-            data = anthropic_client.complete_json(system, "\n".join(lines))
-            if not character_read:
-                character_read = data.get("character_read", "")
-            for d in data.get("directions", []):
-                all_directions.append(GenreDirection(**d, ref_index=idx))
-    else:
-        system = SUGGEST_SYSTEM_PROMPT_NO_REF
-        lines = [
-            f"Character / matchup: {topic}", "",
-            f"Propose {N_GENRE_SUGGESTIONS} distinct genre/vibe directions for an original anime song about this.",
-            "Return only valid JSON.",
-        ]
-        data = anthropic_client.complete_json(system, "\n".join(lines))
-        character_read = data.get("character_read", "")
-        for d in data.get("directions", []):
-            all_directions.append(GenreDirection(**d, ref_index=0))
-
-    return GenreSuggestions(character_read=character_read, directions=all_directions)
 
 
 def _format_instruction_note(user_instruction: str, *, domain: str) -> str:
@@ -764,7 +999,7 @@ def _format_instruction_note(user_instruction: str, *, domain: str) -> str:
 
 def plan_creative_direction(
     project: VideoProject,
-    genre: str,
+    genre: str = "",
     *,
     music_profile: dict | None = None,
     lore_profile: ReferenceLoreProfile | None = None,
@@ -777,8 +1012,10 @@ def plan_creative_direction(
 ) -> CreativeDirection:
     """Plan the original-song brief (cached to ``creative_direction_path``).
 
-    Answers "what is the NEW song?" from the character, the chosen genre and — when a
-    reference exists — its music profile and mined lore. Persisted so a re-run of the
+    Answers "what is the NEW song?" — sound included — from the character and, when a
+    reference exists, its music profile and mined lore. The planner picks the sonic
+    direction itself (in the reference's lane, or by character archetype, steering away
+    from the catalog's recent styles); a non-empty ``genre`` forces it instead. Persisted so a re-run of the
     lyrics step does not re-plan unless ``refresh=True``. ``user_instruction`` is an
     optional free-text steering note (used when regenerating) — it is injected into the
     prompt but never persisted onto the model.
@@ -804,7 +1041,13 @@ def plan_creative_direction(
         # Reuse the cache ONLY when it was planned for the SAME mode. A mode switch
         # (e.g. original → rewrite) must re-plan, or the cached brief keeps pointing
         # the writer away from the story/structure the new mode is meant to follow.
-        if data.get("planned_mode", "original") == effective_mode:
+        # Same for the forced genre — and a brief from before the planner chose the sound
+        # (no sonic_direction) is re-planned when no genre is forced. A brief from before
+        # the energy map (no scenes/energy plan) is re-planned too.
+        if (data.get("planned_mode", "original") == effective_mode
+                and data.get("planned_genre", "") == genre
+                and (genre or data.get("sonic_direction"))
+                and data.get("energy_map")):
             return CreativeDirection(**data)
 
     topic = project.topic or project.character
@@ -814,7 +1057,8 @@ def plan_creative_direction(
         lines += [note, ""]
     lines += [
         f"Character / matchup: {topic}",
-        f"Chosen genre / sonic direction: {genre}",
+        f"User-forced genre (sonic_direction MUST be in it): {genre}" if genre else
+        "Genre: not forced — choose the sonic_direction yourself (see SONIC DIRECTION).",
     ]
     if project.character:
         lines.append(f"Character name(s): {project.character}")
@@ -831,9 +1075,18 @@ def plan_creative_direction(
             "REFERENCE SONIC DNA (energy/tempo context — sound only, no lyrics):",
             f"- BPM: {music_profile.get('bpm')}",
             f"- Onset density: {music_profile.get('onset_rate_per_sec')} onsets/s",
+            "The sonic_direction stays in the reference's lane and uses its BPM; vary only "
+            "within that lane (harder vs. more melodic, a different signature instrument).",
         ]
+    elif not genre:
+        lines += ["", _ARCHETYPE_RANGE_NO_REF]
     if lore_profile and not lore_profile.is_empty():
         lines += ["", _format_lore_for_prompt(lore_profile)]
+
+    catalog_block = catalog_service.format_catalog_for_prompt(
+        catalog_service.load_catalog(project))
+    if catalog_block:
+        lines += ["", catalog_block]
 
     if rewrite:
         lines += [
@@ -869,8 +1122,9 @@ def plan_creative_direction(
 
     data = anthropic_client.complete_json(system_prompt, user_prompt)
     direction = CreativeDirection(**data)
-    # Stamp the mode this brief was planned for so a later mode switch invalidates it.
+    # Stamp the mode/genre this brief was planned for so a later switch invalidates it.
     direction.planned_mode = effective_mode
+    direction.planned_genre = genre
 
     project.run_dir.mkdir(parents=True, exist_ok=True)
     project.creative_direction_path.write_text(
@@ -879,13 +1133,14 @@ def plan_creative_direction(
     return direction
 
 
-def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
+def generate_package(project: VideoProject, genre: str = "", *, is_vs: bool = False,
                      reference_profile: dict | None = None,
                      ref_index: int = 0,
                      mode: str = "original",
                      follow_structure: bool = False,
                      new_hook: bool = True,
                      user_instruction: str = "",
+                     review: bool = False,
                      refresh: bool = False,
                      refresh_lore: bool = False,
                      refresh_structure: bool = False,
@@ -913,6 +1168,9 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
     ``refresh`` re-plans the creative direction; ``refresh_lore`` re-mines all lore;
     ``refresh_structure`` re-extracts the narrative structure / shared story.
     ``user_instruction`` optionally steers the creative-direction re-plan.
+
+    ``review`` adds a second model call that corrects the draft against the rules and the
+    lore. The deterministic checks always run last, on whatever text comes out.
     """
     from cutforge.services import (
         lore_service, reference_service, story_service, structure_service,
@@ -977,20 +1235,29 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
     topic = project.topic or project.character
     lines = [
         f"Character / matchup: {topic}",
-        f"Chosen genre / style direction: {genre}",
+        f"Chosen genre / style direction: {genre or direction.sonic_direction}",
     ]
     if project.character:
         lines.append(f"Character name(s): {project.character}")
     if project.anime:
         lines.append(f"Anime: {project.anime}")
-    if project.channel_slug:
-        lines.append(f"Channel name: {project.channel_slug.replace('-', ' ').title()}")
+    channel_name = project.channel_slug.replace("-", " ").title() if project.channel_slug else ""
+    if channel_name:
+        lines.append(f"Channel name: {channel_name}")
     if is_vs:
         lines.append(
             "This is a VS / matchup song — alternate perspectives and make the chorus the clash."
         )
 
     lines += ["", _format_direction_for_prompt(direction)]
+
+    target_wpl, target_words, flow_note = _flow_target(reference_profile)
+    lines += ["", _format_flow_target(target_wpl, target_words, flow_note)]
+
+    catalog = catalog_service.load_catalog(project)
+    catalog_block = catalog_service.format_catalog_for_prompt(catalog)
+    if catalog_block:
+        lines += ["", catalog_block]
 
     use_structure = structure_profile is not None  # already validated non-empty above
     use_rewrite = story_profile is not None         # already validated non-empty above
@@ -1045,11 +1312,39 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
     user_prompt = "\n".join(lines)
 
     data = anthropic_client.complete_json(system_prompt, user_prompt)
+    lyrics = data.get("lyrics", "")
+    pronunciations = _read_pronunciations(data)
+    if review:
+        lyrics, pronunciations = _review_lyrics(lyrics, pronunciations, topic=topic,
+                                                direction=direction, lore_profile=lore_profile,
+                                                log=log)
+    lint = lyrics_lint_service.lint_lyrics(
+        _deduplicate_intro(lyrics, catalog, direction, channel_name, log))
+    lyrics = lint.lyrics
+    style = data.get("style", "")
+    warnings = (lint.warnings
+                + lyrics_lint_service.check_length(suno_lyrics(lyrics, pronunciations))
+                + lyrics_lint_service.check_style(style))
+    for fix in lint.fixes:
+        log(f"Lyrics fix: {fix}")
+    if lint.adlibs:
+        log("Kept as sung ad-libs: " + "; ".join(f"({a})" for a in lint.adlibs))
+    for term, respelling in pronunciations.items():
+        log(f"Suno pronunciation: {term} → {respelling}")
+    for warning in warnings:
+        log(f"ATENÇÃO: {warning}")
+    wpl, line_count = _words_per_line(lyrics)
+    log(f"Lyrics density: {wpl:.1f} words/line over {line_count} lines "
+        f"(sung lines target ~{target_wpl:g}, rap 8–14 syllables).")
+    if wpl > _DENSE_MEAN_WORDS_PER_LINE:
+        log("Lines are very dense on average — Suno will rush them; consider regenerating.")
     package = SongPackage(
         title=data.get("title", ""),
-        style=data.get("style", ""),
+        style=style,
         exclude=data.get("exclude", ""),
-        lyrics=data.get("lyrics", ""),
+        lyrics=lyrics,
+        pronunciations=pronunciations,
+        warnings=warnings,
         suno_tips=data.get("suno_tips", ""),
         topic=topic,
         character=project.character,
@@ -1063,6 +1358,8 @@ def generate_package(project: VideoProject, genre: str, *, is_vs: bool = False,
             "title": package.title,
             "style": package.style,
             "exclude": package.exclude,
+            "pronunciations": package.pronunciations,
+            "warnings": package.warnings,
             "suno_tips": package.suno_tips,
             "topic": package.topic,
             "character": package.character,

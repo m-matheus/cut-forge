@@ -13,6 +13,7 @@ from cutforge.config.settings import get_settings
 # 1536x1024 = landscape 16:9 (YouTube); 1024x1536 = portrait 9:16 (Shorts/TikTok)
 SIZE_LANDSCAPE = "1536x1024"
 SIZE_PORTRAIT = "1024x1536"
+SIZE_SQUARE = "1024x1024"   # streaming cover art
 
 _MIME_BY_EXT = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
                 ".webp": "image/webp"}
@@ -32,6 +33,7 @@ def generate_image(
     portrait: bool = False,
     quality: str = "high",
     reference_images: list[Path] | None = None,
+    size: str | None = None,
     on_log=None,
 ) -> Path:
     """Generate an image from a natural-language request and write it to ``out_path``.
@@ -43,7 +45,7 @@ def generate_image(
 
     settings = get_settings()
     client = OpenAI(api_key=settings.require("openai_api_key"))
-    size = SIZE_PORTRAIT if portrait else SIZE_LANDSCAPE
+    size = size or (SIZE_PORTRAIT if portrait else SIZE_LANDSCAPE)
 
     if reference_images:
         model_input = [{
@@ -68,6 +70,9 @@ def generate_image(
         model="gpt-4o",
         input=model_input,
         tools=[{"type": "image_generation", "quality": quality, "size": size}],
+        # Force the tool call — otherwise gpt-4o may answer in text (a refusal or a
+        # clarifying question) and no image is produced.
+        tool_choice={"type": "image_generation"},
     )
     image_data = next(
         (item.result for item in response.output
@@ -75,7 +80,10 @@ def generate_image(
         None,
     )
     if not image_data:
-        raise RuntimeError("No image returned by the Responses API")
+        # Surface whatever the model said instead (usually a refusal) so it is debuggable.
+        reply = (getattr(response, "output_text", "") or "").strip()
+        detail = f": {reply[:500]}" if reply else ""
+        raise RuntimeError(f"No image returned by the Responses API{detail}")
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_bytes(base64.b64decode(image_data))

@@ -66,33 +66,58 @@ def _strip_fences(raw: str) -> str:
     return raw.strip()
 
 
+def image_block(data: bytes, media_type: str = "image/png") -> dict:
+    """A user content block carrying an image (base64)."""
+    import base64
+
+    return {"type": "image", "source": {"type": "base64", "media_type": media_type,
+                                        "data": base64.b64encode(data).decode("ascii")}}
+
+
+def plain(text: str) -> dict:
+    return {"type": "text", "text": text}
+
+
 def complete_json(
     system: str,
-    user_prompt: str,
+    user_prompt: str | list[dict],
     *,
-    max_tokens: int = 8000,
+    max_tokens: int = 32000,
     effort: str = "high",
     model: str | None = None,
 ) -> dict:
     """Call Claude and parse the response as a single JSON object.
 
     Adaptive thinking is enabled (Claude decides how much to think; ``effort``
-    tunes the depth). Raises ValueError with the raw text if the model returns
+    tunes the depth). ``user_prompt`` is a string or a list of content blocks (e.g.
+    ``image_block`` + ``plain``). Raises ValueError with the raw text if the model returns
     non-JSON.
+
+    ``max_tokens`` covers thinking *and* the visible answer, so it must leave room for
+    both — at high effort the thinking alone can eat most of a small budget and the JSON
+    gets cut mid-string. Streams the request because the SDK refuses large ``max_tokens``
+    on a plain (non-streaming) call.
     """
     settings = get_settings()
     client = _make_client()
     model = model or settings.anthropic_model
 
-    response = client.messages.create(
+    with client.messages.stream(
         model=model,
         max_tokens=max_tokens,
         system=system,
         messages=[{"role": "user", "content": user_prompt}],
         thinking={"type": "adaptive"},
         output_config={"effort": effort},
-    )
+    ) as stream:
+        response = stream.get_final_message()
     text = next((b.text for b in response.content if b.type == "text"), "")
+    if response.stop_reason == "max_tokens":
+        raise ValueError(
+            f"Claude hit max_tokens={max_tokens} before finishing the JSON "
+            f"(output_tokens={response.usage.output_tokens}). Raise max_tokens or lower "
+            f"effort.\n{text[:1000]}"
+        )
     cleaned = _fix_control_chars(_strip_fences(text))
     try:
         return json.loads(cleaned)

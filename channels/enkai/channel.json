@@ -35,5 +35,14 @@
     "endcard": "assets/endcard.png",
     "icon": "assets/icon.png"
   },
-  "description_template": "{character} original anime song.\n\nⓘ Fan-made edit for entertainment. Anime footage belongs to its original creators/studios. No copyright infringement intended (Fair Use). Audio is an original AI-assisted production.\n\nWho should we make a track for next? Drop a comment! 宴開\n\n#{anime} #{character} #animesong #animeedit #animemusic #amv"
+  "description_template": "{character} original anime song.\n\nⓘ Fan-made edit for entertainment. Anime footage belongs to its original creators/studios. No copyright infringement intended (Fair Use). Audio is an original AI-assisted production.\n\nWho should we make a track for next? Drop a comment! 宴開\n\n#{anime} #{character} #animesong #animeedit #animemusic #amv",
+  "spotify": {
+    "artist_url": "",
+    "artist_name": "ENKAI",
+    "songwriter": "",
+    "title_template": "{song} ({character} Rap)",
+    "genre": "Hip-Hop/Rap",
+    "notice_start": 1.0,
+    "notice_duration": 8.0
+  }
 }

@@ -5,8 +5,11 @@ import json
 
 from cutforge.integrations import anthropic_client
 from cutforge.models.project import VideoProject
+from cutforge.services import catalog_service
 
 _LANG_NAMES = {"en": "English", "es": "Spanish", "pt": "Brazilian Portuguese"}
+_SPOTIFY_LINE = {"en": "🎧 Listen on Spotify:", "es": "🎧 Escúchala en Spotify:",
+                 "pt": "🎧 Ouça no Spotify:"}
 
 METADATA_SYSTEM_PROMPT = """\
 You are the metadata generator for "Enkai" (宴開), a YouTube channel that makes
@@ -57,8 +60,9 @@ PART 1 — Subscribe hook (ONE short sentence):
 
 PART 2 — Character / song line (ONE sentence):
   Say this is Enkai's original anime rap for {character} from {anime}, and
-  capture the vibe using {mood} (e.g. "dark and vengeful", written from the
-  character's side of the story).
+  capture the vibe of THIS song (e.g. "dark and vengeful", written from the
+  character's side of the story) — from {mood} if given, otherwise from {theme}
+  and {hook}. Describe the song you were given; never invent a different one.
 
 PART 3 — CREDITS (label-style block, identical structure in all
   languages, wrapped in the ━ separators). All roles are Enkai:
@@ -97,22 +101,49 @@ TAGS (the "tags" array, 6–8 items max):
 """
 
 
+def _song_theme(project: VideoProject) -> str:
+    """The brief's core theme, so the description matches the song actually written."""
+    if project.creative_direction_path.exists():
+        data = json.loads(project.creative_direction_path.read_text(encoding="utf-8"))
+        return data.get("core_theme", "")
+    return ""
+
+
+def _song_hook(project: VideoProject) -> str:
+    """The first lines of the chorus, joined on one line ("" without lyrics)."""
+    if not project.lyrics_path.exists():
+        return ""
+    lyrics = project.lyrics_path.read_text(encoding="utf-8")
+    hook = catalog_service.sung_text(catalog_service.section(lyrics, "chorus", "hook",
+                                                             "refrain"))
+    return " / ".join(hook.splitlines()[:4])
+
+
 def generate_metadata(project: VideoProject, *, on_log=None) -> dict:
     """Generate and persist script/metadata.json (title, description, tags)."""
-    song_title = project.title or project.character
+    # project.title is the YouTube title (set below); the song title comes from the
+    # latest lyrics step, so a regenerated song never inherits an older song's name.
+    song_title = project.song_title
     lang = _LANG_NAMES.get(project.language, "English")
     user_prompt = (
         f"song: {song_title}\n"
         f"character: {project.character}\n"
         f"anime: {project.anime}\n"
         f"mood: {project.mood}\n"
+        f"theme: {_song_theme(project)}\n"
+        f"hook: {_song_hook(project)}\n"
         f"lang: {project.language}\n\n"
         f"Write the title, description and tags in {lang}. Return only valid JSON."
     )
     data = anthropic_client.complete_json(METADATA_SYSTEM_PROMPT, user_prompt)
+    description = data.get("description", "")
+    spotify = project.spotify_track_link or project.channel.spotify.artist_link
+    if spotify:
+        # First line: the part of the description YouTube shows above "...more".
+        description = f"{_SPOTIFY_LINE.get(project.language, _SPOTIFY_LINE['en'])} {spotify}\n\n{description}"
     metadata = {
         "title": data.get("title", ""),
-        "description": data.get("description", ""),
+        "description": description,
         "tags": data.get("tags", []),
         "content_type": "music",
         "channel": project.channel_slug,

@@ -7,14 +7,20 @@ Cut Pro 7 XML** que o **Adobe Premiere Pro importa nativamente** — você edita
 ## O que ele faz
 
 1. **Letra & estilo** — gera um pacote de música (título, style Suno, letra) via API Anthropic.
+   Um validador corrige efeitos sonoros entre parênteses e avisa sobre tags longas, letra longa
+   demais para uma geração do Suno e rap picotado. Opcionalmente, uma segunda chamada revisa a
+   letra contra as regras e o lore.
 2. **Suno (manual)** — você gera a música no [suno.ai](https://suno.ai) e coloca `track.mp3` no run.
 3. **Footage** — baixa um vídeo do YouTube (AMV/edit) via yt-dlp para usar de fundo.
-4. **Alinhar letra** — alinha a letra ao áudio com Whisper (timestamps por palavra).
+4. **Alinhar letra** — alinha a letra ao áudio com Whisper (timestamps por palavra). Vale a letra gravada no MP3 pelo Suno: se ela difere do `lyrics.txt`, ele é substituído (o antigo fica em `lyrics_previous.txt`). Para corrigir o que o Suno cantou diferente, edite o `lyrics.txt` depois de colocar o track.
 5. **Captions** — gera legenda karaokê (`.ass`) para importar no Premiere.
 6. **Thumbnail** — gera a capa (16:9) via OpenAI (Responses API / gpt-image).
 7. **Metadata** — gera título/descrição/tags do YouTube via Anthropic.
-8. **Exportar Premiere** — gera `premiere/project.xml`: footage em V1, música em A1, e **marcadores
-   em cada linha da letra** (pra cortar no ritmo). Abra no Premiere e edite.
+8. **Lançamento (Spotify)** — prepara o single para a distribuidora (DistroKid / ONErpm / Tunecore):
+   capa 3000×3000 sem o personagem, letra limpa e todos os campos do formulário com botão Copiar.
+9. **Exportar Premiere** — gera `premiere/project.xml`: footage em V1, **QR "Ouça no Spotify"
+   em V2 sobre a intro**, música em A1, e **marcadores em cada linha da letra** (pra cortar no
+   ritmo). Abra no Premiere e edite.
 
 > **Escopo v1:** só vídeos de música, um idioma por run. Sem publish automático — o pipeline
 > termina na exportação do projeto Premiere.
@@ -54,6 +60,21 @@ pip install -e ".[dev]"
 pyinstaller build.spec
 # dist/CutForge.exe
 ```
+
+## Spotify (lançamento como artista)
+
+O canal lança no Spotify como **artista**, via distribuidora — não como podcast: assim a
+música entra no catálogo, conta streams e gera royalties.
+
+**Uma vez**, em `channels/enkai/channel.json` → `spotify`:
+- `songwriter`: seu nome legal (o Spotify não aceita só o nome artístico como compositor);
+- `artist_url`: o link `https://open.spotify.com/artist/...`, depois que o perfil existir.
+
+**Por música:** baixe o **WAV** no Suno e envie no card *Lançamento*; rode o passo e copie os
+campos para a distribuidora. **Deixe o YouTube Content ID da distribuidora desligado** (ou
+libere o seu canal): ligado, os seus próprios vídeos levam claim. Quando a faixa sair, cole o
+link `open.spotify.com/track/...` no card e refaça *Metadata* e *Premiere*: o QR do vídeo e a
+1ª linha da descrição passam a abrir a faixa (até lá, o perfil de artista).
 
 ## Footage (download do YouTube)
 

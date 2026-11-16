@@ -88,6 +88,13 @@ STEPS: list[Step] = [
         can_run=_always,
     ),
     Step(
+        id="release",
+        label="Lançamento (Spotify)",
+        is_done=lambda p: p.release_path.exists() and p.cover_path.exists(),
+        can_run=lambda p: p.lyrics_path.exists(),
+        requires_hint="Gere a letra primeiro.",
+    ),
+    Step(
         id="premiere",
         label="Exportar Premiere",
         is_done=lambda p: p.premiere_project_path.exists(),

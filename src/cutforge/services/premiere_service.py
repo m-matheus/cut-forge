@@ -73,6 +73,43 @@ def _file_url(path: Path) -> str:
     return uri.replace("file:///", "file://localhost/", 1)
 
 
+def _spotify_notice_track(project: VideoProject, fps: float, song_s: float, on_log):
+    """V2 — the "listen on Spotify" QR clip over the intro, or None without a link."""
+    import opentimelineio as otio
+    from opentimelineio.opentime import RationalTime, TimeRange
+
+    from cutforge.services import spotify_notice_service
+
+    log = on_log or (lambda _m: None)
+    url = spotify_notice_service.target_url(project)
+    if not url:
+        log("Spotify QR: skipped — set spotify.artist_url in channel.json (or the run's "
+            "Spotify track link).")
+        return None
+    spec = project.channel.spotify
+    start = max(0.0, min(spec.notice_start, song_s - 1.0))
+    duration = max(1.0, min(spec.notice_duration, song_s - start))
+    clip_path = spotify_notice_service.build_notice(project, url, duration,
+                                                    project.spotify_qr_path)
+    kind = "this track" if project.spotify_track_link else "the artist profile"
+    log(f"Spotify QR: {kind} ({url}) at {start:.1f}s for {duration:.1f}s")
+
+    frames = max(1, round(duration * fps))
+    clip_range = TimeRange(RationalTime(0, fps), RationalTime(frames, fps))
+    track = otio.schema.Track(name="V2", kind=otio.schema.TrackKind.Video)
+    lead = round(start * fps)
+    if lead:
+        track.append(otio.schema.Gap(source_range=TimeRange(
+            RationalTime(0, fps), RationalTime(lead, fps))))
+    track.append(otio.schema.Clip(
+        name="spotify qr",
+        media_reference=otio.schema.ExternalReference(
+            target_url=_file_url(clip_path), available_range=clip_range),
+        source_range=clip_range,
+    ))
+    return track
+
+
 def build_project(project: VideoProject, *, on_log=None) -> Path:
     """Build the Premiere-importable FCP7 XML for the run. Returns the .xml path."""
     import opentimelineio as otio
@@ -141,6 +178,9 @@ def build_project(project: VideoProject, *, on_log=None) -> Path:
     audio_track.append(audio_clip)
 
     timeline.tracks.append(video_track)
+    notice_track = _spotify_notice_track(project, fps, duration_s, on_log)
+    if notice_track is not None:
+        timeline.tracks.append(notice_track)
     timeline.tracks.append(audio_track)
 
     # Markers at each lyric-line start (cut on the beat)

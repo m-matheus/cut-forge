@@ -65,15 +65,15 @@ def _execute(step_id: str, project: VideoProject, params: dict, log: LogFn):
         return {"bpm": profile.get("bpm"), "title": profile.get("source_title"), "index": index}
 
     if step_id == "lyrics":
-        genre = params.get("genre")
-        if not genre:
-            raise ValueError("Missing 'genre' — pick a genre direction first.")
+        # Optional: empty lets the creative-direction planner pick the sound.
+        genre = (params.get("genre") or "").strip()
         pkg = song_service.generate_package(
             project, genre, is_vs=params.get("is_vs", False),
             ref_index=int(params.get("ref_index", 0)),
             mode=params.get("mode", "original"),
             follow_structure=params.get("follow_structure", False),
             new_hook=params.get("new_hook", True),
+            review=params.get("review", False),
             refresh=params.get("refresh", False), on_log=log)
         log(f"Song: {pkg.title}")
         return {"title": pkg.title, "style": pkg.style}
@@ -107,12 +107,15 @@ def _execute(step_id: str, project: VideoProject, params: dict, log: LogFn):
         return {"ok": True}
 
     if step_id == "thumbnail":
-        path = thumbnail_service.generate_thumbnail(project, on_log=log)
-        return {"path": path}
+        return thumbnail_service.run(project, params, log)
 
     if step_id == "metadata":
         meta = metadata_service.generate_metadata(project, on_log=log)
         return {"title": meta.get("title")}
+
+    if step_id == "release":
+        from cutforge.services import release_service
+        return release_service.run(project, params, log)
 
     if step_id == "premiere":
         path = premiere_service.build_project(project, on_log=log)

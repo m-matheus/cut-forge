@@ -37,6 +37,9 @@ class VideoProject(BaseModel):
     title: str = ""
     footage_urls: list[str] = Field(default_factory=list)
     reference_urls: list[str] = Field(default_factory=list)
+    # The song's public link, pasted once the distributor's release is live on Spotify.
+    # The video's QR code points to it (the channel's artist profile until then).
+    spotify_track_url: str = ""
     # DEPRECATED — kept so old project.json files still load. Migrated to
     # footage_urls / reference_urls on first load via model_post_init.
     footage_url: str = ""
@@ -71,12 +74,59 @@ class VideoProject(BaseModel):
         return self.run_dir / "lyrics.txt"
 
     @property
+    def previous_lyrics_path(self) -> Path:
+        """What lyrics.txt held before it was replaced by the sheet inside the track."""
+        return self.run_dir / "lyrics_previous.txt"
+
+    @property
     def suno_prompt_path(self) -> Path:
         return self.run_dir / "suno_prompt.json"
 
     @property
+    def song_title(self) -> str:
+        """The SONG title from the latest lyrics step (``title`` holds the YouTube title)."""
+        if self.suno_prompt_path.exists():
+            title = json.loads(self.suno_prompt_path.read_text(encoding="utf-8")).get("title")
+            if title:
+                return title
+        return self.title or self.character
+
+    @property
     def track_path(self) -> Path:
         return self.audio_dir / "track.mp3"
+
+    @property
+    def track_wav_path(self) -> Path:
+        """Suno's lossless WAV download — what the distributor should get."""
+        return self.audio_dir / "track.wav"
+
+    @property
+    def release_dir(self) -> Path:
+        return self.run_dir / "release"
+
+    @property
+    def release_path(self) -> Path:
+        """Every field of the distributor's form, as JSON (the UI renders it)."""
+        return self.release_dir / "release.json"
+
+    @property
+    def cover_path(self) -> Path:
+        return self.release_dir / "cover.jpg"
+
+    @property
+    def release_lyrics_path(self) -> Path:
+        return self.release_dir / "lyrics.txt"
+
+    @property
+    def spotify_qr_path(self) -> Path:
+        return self.premiere_dir / "spotify_qr.mov"
+
+    @property
+    def spotify_track_link(self) -> str:
+        """The track link without tracking params (denser QR otherwise); "" if unset or
+        not an open.spotify.com track link."""
+        url = self.spotify_track_url.strip().split("?")[0]
+        return url if url.startswith("https://open.spotify.com/track/") else ""
 
     @property
     def whisper_cache_path(self) -> Path:
@@ -159,10 +209,6 @@ class VideoProject(BaseModel):
     @property
     def premiere_project_path(self) -> Path:
         return self.premiere_dir / f"{self.run_id}.xml"
-
-    @property
-    def title_card_path(self) -> Path:
-        return self.premiere_dir / "title_card.png"
 
     # --- Reference rap(s) (optional inspiration sources) ---
     @property

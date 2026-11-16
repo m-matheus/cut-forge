@@ -28,7 +28,7 @@ from cutforge.config.settings import get_settings
 from cutforge.models.project import VideoProject, list_runs, list_runs_summary
 from cutforge.pipeline import runner
 from cutforge.pipeline.steps import wizard_state
-from cutforge.services import song_service
+from cutforge.services import song_service, thumbnail_service
 
 _HERE = Path(__file__).resolve().parent
 _UI = _HERE.parent / "ui"
@@ -117,13 +117,6 @@ def create_app() -> FastAPI:
         from cutforge.services import footage_service
         footage_service.remove_footage(project, index)
         return {"status": "deleted", "index": index}
-
-    # ---- Lyrics: genre suggestions (synchronous — quick) ----
-    @app.post("/api/runs/{run_id}/suggest-genres")
-    def suggest_genres(run_id: str, payload: dict | None = None):
-        project = VideoProject.load(run_id)
-        suggestions = song_service.suggest_genres(project)
-        return suggestions.model_dump()
 
     # ---- Mood suggestion (stateless — used on the create screen) ----
     @app.post("/api/suggest-mood")
@@ -294,9 +287,7 @@ def create_app() -> FastAPI:
     @app.post("/api/runs/{run_id}/creative-direction/refresh")
     def refresh_creative_direction(run_id: str, payload: dict | None = None):
         data = payload or {}
-        genre = (data.get("genre") or "").strip()
-        if not genre:
-            return JSONResponse({"error": "genre is required"}, status_code=400)
+        genre = (data.get("genre") or "").strip()   # "" = the planner picks the sound
         ref_index = int(data.get("ref_index", 0))
         instruction = (data.get("instruction") or "").strip()
         mode = data.get("mode", "original")
@@ -354,6 +345,10 @@ def create_app() -> FastAPI:
         project.track_path.write_bytes(data)
         mb = len(data) / 1_048_576
         log(f"track.mp3 salvo: {mb:.1f} MB em {project.track_path.name}")
+        # The alignment and captions were timed against the previous track.
+        for stale in (project.alignment_path, project.captions_srt_path,
+                      project.premiere_transcript_path):
+            stale.unlink(missing_ok=True)
         return {"status": "ok", "size": len(data)}
 
     # ---- Thumbnail style-reference images (optional, per run) ----
@@ -365,28 +360,63 @@ def create_app() -> FastAPI:
         refs_dir = project.thumbnail_refs_dir
         refs_dir.mkdir(parents=True, exist_ok=True)
         saved = 0
-        # Continue numbering after any existing refs so multiple uploads accumulate.
-        existing = len(project.thumbnail_ref_paths())
+        # Number after the highest existing ref (not the count): after a removal the count
+        # would reuse a live name and inherit that ref's cleaned copy.
+        nums = [int(m.group()) for p in project.thumbnail_ref_paths()
+                if (m := re.search(r"\d+", p.stem))]
+        start = max(nums, default=0)
         for file in files:
             ext = Path(file.filename or "").suffix.lower()
             if ext not in _IMG_EXTS:
                 continue
             data = await file.read()
-            (refs_dir / f"ref_{existing + saved + 1:02d}{ext}").write_bytes(data)
+            (refs_dir / f"ref_{start + saved + 1:02d}{ext}").write_bytes(data)
             saved += 1
-        return {"status": "ok", "count": len(project.thumbnail_ref_paths()), "added": saved}
+        if saved:
+            # The described direction was made from the old set of refs.
+            (project.thumbnail_dir / "ref_direction.json").unlink(missing_ok=True)
+        return {"status": "ok", "refs": [p.name for p in project.thumbnail_ref_paths()],
+                "added": saved}
 
     @app.get("/api/runs/{run_id}/thumbnail-refs")
     def list_thumbnail_refs(run_id: str):
         project = VideoProject.load(run_id)
-        return {"count": len(project.thumbnail_ref_paths())}
+        return {"refs": [p.name for p in project.thumbnail_ref_paths()]}
 
-    @app.delete("/api/runs/{run_id}/thumbnail-refs")
-    def clear_thumbnail_refs(run_id: str):
+    @app.get("/api/runs/{run_id}/thumbnail-refs/{name}")
+    def get_thumbnail_ref(run_id: str, name: str):
         project = VideoProject.load(run_id)
-        for p in project.thumbnail_ref_paths():
-            p.unlink(missing_ok=True)
-        return {"status": "ok", "count": 0}
+        match = next((p for p in project.thumbnail_ref_paths() if p.name == name), None)
+        if match is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return FileResponse(str(match))
+
+    @app.delete("/api/runs/{run_id}/thumbnail-refs/{name}")
+    def delete_thumbnail_ref(run_id: str, name: str):
+        project = VideoProject.load(run_id)
+        match = next((p for p in project.thumbnail_ref_paths() if p.name == name), None)
+        if match is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        match.unlink()
+        # Its cleaned copy and the described direction belong to the old set of refs.
+        (project.thumbnail_dir / "refs_clean" / f"{match.stem}.png").unlink(missing_ok=True)
+        (project.thumbnail_dir / "ref_direction.json").unlink(missing_ok=True)
+        return {"deleted": match.name}
+
+    # ---- Thumbnail variants (every generated art; pick one via the thumbnail step) ----
+    @app.get("/api/runs/{run_id}/thumbnail-variants")
+    def list_thumbnail_variants(run_id: str):
+        project = VideoProject.load(run_id)
+        return {"variants": [p.name for p in thumbnail_service.variant_paths(project)],
+                "selected": thumbnail_service.selection(project).get("art")}
+
+    @app.get("/api/runs/{run_id}/thumbnail-variants/{name}")
+    def get_thumbnail_variant(run_id: str, name: str):
+        project = VideoProject.load(run_id)
+        match = next((p for p in thumbnail_service.variant_paths(project) if p.name == name), None)
+        if match is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return FileResponse(str(match), media_type="image/png")
 
     # ---- SSE log stream ----
     @app.get("/api/runs/{run_id}/events")
@@ -420,8 +450,13 @@ def create_app() -> FastAPI:
         suno = {}
         if project.suno_prompt_path.exists():
             suno = json.loads(project.suno_prompt_path.read_text(encoding="utf-8"))
+        lyrics = project.lyrics_path.read_text(encoding="utf-8")
+        pronunciations = suno.get("pronunciations", {})
         return {
-            "lyrics": project.lyrics_path.read_text(encoding="utf-8"),
+            "lyrics": lyrics,
+            "suno_lyrics": song_service.suno_lyrics(lyrics, pronunciations),
+            "pronunciations": pronunciations,
+            "warnings": suno.get("warnings", []),
             "title": suno.get("title", ""),
             "style": suno.get("style", ""),
             "exclude": suno.get("exclude", ""),
@@ -455,6 +490,50 @@ def create_app() -> FastAPI:
         if not project.thumbnail_path.exists():
             return JSONResponse({"error": "not found"}, status_code=404)
         return FileResponse(str(project.thumbnail_path), media_type="image/jpeg")
+
+    # ---- Release (distributor form, cover, WAV, Spotify link) ----
+    @app.get("/api/runs/{run_id}/output/release")
+    def output_release(run_id: str):
+        project = VideoProject.load(run_id)
+        if not project.release_path.exists():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        form = json.loads(project.release_path.read_text(encoding="utf-8"))
+        form["spotify_track_url"] = project.spotify_track_url
+        form["spotify_track_link"] = project.spotify_track_link
+        form["artist_link"] = project.channel.spotify.artist_link
+        return form
+
+    @app.get("/api/runs/{run_id}/output/cover")
+    def output_cover(run_id: str):
+        project = VideoProject.load(run_id)
+        if not project.cover_path.exists():
+            return JSONResponse({"error": "not found"}, status_code=404)
+        return FileResponse(str(project.cover_path), media_type="image/jpeg")
+
+    @app.post("/api/runs/{run_id}/release-audio")
+    async def upload_release_audio(run_id: str, file: UploadFile):
+        """Suno's WAV download → audio/track.wav (the distributor's file)."""
+        from cutforge.services import release_service
+        if not (file.filename or "").lower().endswith(".wav"):
+            return JSONResponse({"error": "Envie o WAV baixado do Suno (.wav)."}, status_code=400)
+        project = VideoProject.load(run_id)
+        project.audio_dir.mkdir(parents=True, exist_ok=True)
+        data = await file.read()
+        project.track_wav_path.write_bytes(data)
+        events.make_logger(run_id)(f"track.wav salvo: {len(data) / 1_048_576:.1f} MB")
+        if project.release_path.exists():
+            release_service.refresh_form(project)
+        return {"status": "ok", "size": len(data)}
+
+    @app.post("/api/runs/{run_id}/spotify-link")
+    def set_spotify_link(run_id: str, payload: dict | None = None):
+        project = VideoProject.load(run_id)
+        project.spotify_track_url = ((payload or {}).get("url") or "").strip()
+        project.save()
+        if project.spotify_track_url and not project.spotify_track_link:
+            return JSONResponse({"error": "Use o link da faixa: https://open.spotify.com/track/..."},
+                                status_code=400)
+        return {"status": "ok", "link": project.spotify_track_link}
 
     # ---- Open output folder in OS file explorer ----
     @app.post("/api/runs/{run_id}/open-folder")
