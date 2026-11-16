@@ -10,9 +10,13 @@ venv/
 
 # Env / secrets
 .env
+*cookies*.txt
 
 # App output (runs)
 output/
+
+# Premiere keeps its own backups next to the project
+Adobe Premiere Pro Auto-Save/
 
 # PyInstaller
 *.spec.bak
@@ -22,5 +26,3 @@ output/
 Thumbs.db
 .idea/
 .vscode/
-
-www.youtube.com_cookies.txt
